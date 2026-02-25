@@ -1521,10 +1521,10 @@ Configure release build and test binaries.
 > Per pdr.md, the **MVP (v0.1.0)** includes Anthropic-only provider support plus
 > RLM foundation. Additional providers, permission rules, and full RLM are **v1.0**.
 
-| Version      | Phases Included                      |
-| ------------ | ------------------------------------ |
+| Version      | Phases Included                                |
+| ------------ | ---------------------------------------------- |
 | v0.1.0 (MVP) | Phase 0–5 + T6.1, excluding T2.2–T2.5 and T5.2 |
-| v1.0         | T2.2–T2.5, T5.2, T6.2–T6.3, Phase 7–9 |
+| v1.0         | T2.2–T2.5, T5.2, T6.2–T6.3, Phase 7–9          |
 
 ---
 
@@ -1596,18 +1596,18 @@ All ─────────────────────────�
 
 ## Progress Tracking
 
-| Phase         | Tasks     | Status         |
-| ------------- | --------- | -------------- |
-| 0. Setup      | T0.1-T0.3 | ⬜ Not Started |
-| 1. Core Types | T1.1-T1.4 | ⬜ Not Started |
-| 2. Providers  | T2.1-T2.5 | ⬜ Not Started |
-| 3. Tools      | T3.1-T3.7 | ⬜ Not Started |
-| 4. Session    | T4.1      | ⬜ Not Started |
-| 5. Agent      | T5.1-T5.2 | ⬜ Not Started |
-| 6. RLM        | T6.1-T6.3 | ⬜ Not Started |
-| 7. TUI        | T7.1-T7.5 | ⬜ Not Started |
-| 8. CLI        | T8.1-T8.3 | ⬜ Not Started |
-| 9. Polish     | T9.1-T9.3 | ⬜ Not Started |
+| Phase         | Tasks     | Status                        |
+| ------------- | --------- | ----------------------------- |
+| 0. Setup      | T0.1–T0.3 | ✅ Complete                   |
+| 1. Core Types | T1.1–T1.4 | ✅ Complete                   |
+| 2. Providers  | T2.1–T2.5 | 🟡 T2.1 done (T2.2–T2.5 v1.0) |
+| 3. Tools      | T3.1–T3.7 | ⬜ Not Started                |
+| 4. Session    | T4.1      | ⬜ Not Started                |
+| 5. Agent      | T5.1–T5.2 | ⬜ Not Started                |
+| 6. RLM        | T6.1–T6.3 | ⬜ Not Started                |
+| 7. TUI        | T7.1–T7.5 | ⬜ Not Started                |
+| 8. CLI        | T8.1–T8.3 | ⬜ Not Started                |
+| 9. Polish     | T9.1–T9.3 | ⬜ Not Started                |
 
 ---
 
@@ -1617,4 +1617,4 @@ All ─────────────────────────�
 | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
 | 1.0     | 2026-02-25 | Initial plan created                                                                                             |
 | 1.1     | 2026-02-25 | Fixed: T0.3 error types, T3.6 dependency, missing T2.4/T2.5 providers, workspace deps, MVP scope, layout diagram |
-| 1.2     | 2026-02-25 | Normalized roadmap: MVP provider scope, RLM phases, permission timing, and `rot-cli` binary scaffolding        |
+| 1.2     | 2026-02-25 | Normalized roadmap: MVP provider scope, RLM phases, permission timing, and `rot-cli` binary scaffolding          |

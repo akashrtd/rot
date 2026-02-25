@@ -14,3 +14,6 @@ tracing = { workspace = true }
 ulid = { workspace = true }
 blake3 = { workspace = true }
 dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

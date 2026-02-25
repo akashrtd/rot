@@ -2,6 +2,8 @@
 
 mod error;
 pub mod format;
+pub mod store;
 
 pub use error::SessionError;
-pub use format::{SessionEntry, SessionMeta, entry_id, entry_timestamp};
+pub use format::{entry_id, entry_timestamp, SessionEntry, SessionMeta};
+pub use store::{Session, SessionStore};

@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+rot-provider = { workspace = true }
+rot-tools = { workspace = true }
+rot-session = { workspace = true }
+
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }

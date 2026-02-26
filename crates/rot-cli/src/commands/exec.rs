@@ -5,7 +5,7 @@ use rot_provider::{AnthropicProvider, Provider, new_zai_provider};
 use rot_tools::ToolRegistry;
 
 /// Execute a single prompt and print the result.
-pub async fn run(prompt: &str, model: &str, provider_name: &str) -> anyhow::Result<()> {
+pub async fn run(prompt: &str, model: Option<&str>, provider_name: &str) -> anyhow::Result<()> {
     let provider = create_provider(provider_name, model)?;
     let mut tools = ToolRegistry::new();
     rot_tools::register_all(&mut tools);
@@ -35,7 +35,7 @@ pub async fn run(prompt: &str, model: &str, provider_name: &str) -> anyhow::Resu
 
 fn create_provider(
     provider_name: &str,
-    model: &str,
+    model: Option<&str>,
 ) -> anyhow::Result<Box<dyn Provider>> {
     match provider_name {
         "anthropic" => {
@@ -46,9 +46,9 @@ fn create_provider(
                 )
             })?;
             let mut provider = AnthropicProvider::new(api_key);
-            if model != "claude-sonnet-4-20250514" {
+            if let Some(m) = model {
                 provider
-                    .set_model(model)
+                    .set_model(m)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
             }
             Ok(Box::new(provider))
@@ -62,9 +62,9 @@ fn create_provider(
                 )
             })?;
             let mut provider = new_zai_provider(api_key);
-            if model != "glm-5" {
+            if let Some(m) = model {
                 provider
-                    .set_model(model)
+                    .set_model(m)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
             }
             Ok(Box::new(provider))

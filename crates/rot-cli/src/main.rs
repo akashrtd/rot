@@ -21,10 +21,10 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         None | Some(Commands::Chat) => {
-            commands::chat::run(&cli.model, &cli.provider).await?;
+            commands::chat::run(cli.model.as_deref(), &cli.provider).await?;
         }
         Some(Commands::Exec { prompt }) => {
-            commands::exec::run(&prompt, &cli.model, &cli.provider).await?;
+            commands::exec::run(&prompt, cli.model.as_deref(), &cli.provider).await?;
         }
         Some(Commands::Session { action }) => match action {
             SessionAction::List { limit } => {

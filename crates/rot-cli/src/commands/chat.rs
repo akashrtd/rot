@@ -3,14 +3,15 @@ use rot_session::SessionStore;
 use rot_tools::ToolRegistry;
 
 /// Run interactive chat mode.
-pub async fn run(model: &str, provider_name: &str) -> anyhow::Result<()> {
+pub async fn run(model: Option<&str>, provider_name: &str) -> anyhow::Result<()> {
     let provider = create_provider(provider_name, model)?;
+    let model_name = provider.current_model().to_string();
     let mut tools = ToolRegistry::new();
     rot_tools::register_all(&mut tools);
 
     let session_store = SessionStore::new();
 
-    rot_tui::run_tui(provider, tools, session_store, model, provider_name)
+    rot_tui::run_tui(provider, tools, session_store, &model_name, provider_name)
         .await
         .map_err(|e| anyhow::anyhow!("TUI error: {e}"))?;
 
@@ -19,7 +20,7 @@ pub async fn run(model: &str, provider_name: &str) -> anyhow::Result<()> {
 
 fn create_provider(
     provider_name: &str,
-    model: &str,
+    model: Option<&str>,
 ) -> anyhow::Result<Box<dyn Provider>> {
     match provider_name {
         "anthropic" => {
@@ -30,9 +31,9 @@ fn create_provider(
                 )
             })?;
             let mut provider = AnthropicProvider::new(api_key);
-            if model != "claude-sonnet-4-20250514" {
+            if let Some(m) = model {
                 provider
-                    .set_model(model)
+                    .set_model(m)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
             }
             Ok(Box::new(provider))
@@ -46,9 +47,9 @@ fn create_provider(
                 )
             })?;
             let mut provider = new_zai_provider(api_key);
-            if model != "glm-5" {
+            if let Some(m) = model {
                 provider
-                    .set_model(model)
+                    .set_model(m)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
             }
             Ok(Box::new(provider))

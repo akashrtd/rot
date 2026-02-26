@@ -9,9 +9,9 @@ pub struct Cli {
     #[arg(long, default_value = "anthropic", global = true)]
     pub provider: String,
 
-    /// Model to use.
-    #[arg(long, default_value = "claude-sonnet-4-20250514", global = true)]
-    pub model: String,
+    /// Model to use (defaults to provider's default model).
+    #[arg(long, global = true)]
+    pub model: Option<String>,
 
     /// Enable verbose logging.
     #[arg(short, long, global = true)]

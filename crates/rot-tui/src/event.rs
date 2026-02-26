@@ -1,6 +1,6 @@
 //! Terminal event handling.
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use std::time::Duration;
 
 /// Terminal event types.
@@ -8,6 +8,8 @@ use std::time::Duration;
 pub enum TermEvent {
     /// A key was pressed.
     Key(KeyEvent),
+    /// Mouse scroll.
+    MouseScroll(i16),
     /// Terminal was resized.
     Resize(u16, u16),
     /// No event (tick).
@@ -19,6 +21,11 @@ pub fn poll_event(timeout: Duration) -> std::io::Result<TermEvent> {
     if event::poll(timeout)? {
         match event::read()? {
             Event::Key(key) => Ok(TermEvent::Key(key)),
+            Event::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::ScrollUp => Ok(TermEvent::MouseScroll(-3)),
+                MouseEventKind::ScrollDown => Ok(TermEvent::MouseScroll(3)),
+                _ => Ok(TermEvent::Tick),
+            },
             Event::Resize(w, h) => Ok(TermEvent::Resize(w, h)),
             _ => Ok(TermEvent::Tick),
         }

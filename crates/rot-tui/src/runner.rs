@@ -6,7 +6,7 @@
 
 use crate::app::{App, AppState, ChatStyle, InputMode};
 use crate::event::{is_quit, poll_event, TermEvent};
-use crossterm::event::KeyCode;
+use crossterm::event::{EnableMouseCapture, DisableMouseCapture, KeyCode};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -41,6 +41,7 @@ pub async fn run_tui(
     // Setup terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
+    stdout().execute(EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
     let mut app = App::new(model, provider_name);
@@ -198,6 +199,16 @@ pub async fn run_tui(
                     }
                 }
             }
+            TermEvent::MouseScroll(delta) => {
+                if delta < 0 {
+                    // Scroll up
+                    app.auto_scroll = false;
+                    app.scroll_offset = app.scroll_offset.saturating_sub((-delta) as u16);
+                } else {
+                    // Scroll down
+                    app.scroll_offset = app.scroll_offset.saturating_add(delta as u16);
+                }
+            }
             TermEvent::Resize(_, _) => {}
             TermEvent::Tick => {}
         }
@@ -205,6 +216,7 @@ pub async fn run_tui(
 
     // Cleanup
     disable_raw_mode()?;
+    stdout().execute(DisableMouseCapture)?;
     stdout().execute(LeaveAlternateScreen)?;
     Ok(())
 }

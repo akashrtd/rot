@@ -1599,7 +1599,9 @@ name = "rot-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
+ "futures",
  "rot-core",
  "rot-provider",
  "rot-rlm",
@@ -1608,6 +1610,7 @@ dependencies = [
  "rot-tui",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

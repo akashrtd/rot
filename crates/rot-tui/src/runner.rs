@@ -6,7 +6,7 @@
 
 use crate::app::{App, AppState, ChatStyle, InputMode};
 use crate::event::{is_quit, poll_event, TermEvent};
-use crossterm::event::{EnableMouseCapture, DisableMouseCapture, KeyCode};
+use crossterm::event::{EnableMouseCapture, DisableMouseCapture, KeyCode, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -21,10 +21,12 @@ use std::time::Duration;
 
 /// Messages sent from the background processing task back to the TUI.
 enum AgentEvent {
-    /// Agent finished successfully with text response.
+    /// Agent finished successfully.
     Response {
         text: String,
         tool_names: Vec<String>,
+        input_tokens: usize,
+        output_tokens: usize,
     },
     /// Agent encountered an error.
     Error(String),
@@ -46,6 +48,9 @@ pub async fn run_tui(
 
     let mut app = App::new(model, provider_name);
 
+    // Show welcome banner
+    app.show_welcome();
+
     // Create session
     let cwd = std::env::current_dir()?;
     let _session = session_store
@@ -59,7 +64,8 @@ pub async fn run_tui(
             "You are rot, a powerful AI coding assistant. \
              You have access to tools for reading, writing, and editing files, \
              running shell commands, searching code, and fetching URLs. \
-             Be concise and helpful."
+             Be concise and helpful. Use markdown formatting in your responses \
+             (bold for emphasis, backticks for code)."
                 .to_string(),
         ),
         ..Default::default()
@@ -78,17 +84,26 @@ pub async fn run_tui(
         // Check for agent completion (non-blocking)
         while let Ok(event) = rx.try_recv() {
             match event {
-                AgentEvent::Response { text, tool_names } => {
-                    app.push_chat("rot", &text, ChatStyle::Assistant);
+                AgentEvent::Response {
+                    text,
+                    tool_names,
+                    input_tokens,
+                    output_tokens,
+                } => {
+                    // Show tool calls before the response
                     for name in &tool_names {
                         app.push_chat("tool", &format!("↳ {name}"), ChatStyle::Tool);
                     }
+                    app.push_chat("rot", &text, ChatStyle::Assistant);
+                    app.stop_timer();
+                    app.record_tokens(input_tokens, output_tokens);
                     app.state = AppState::Idle;
                     app.status = "Ready".to_string();
                     app.streaming_text.clear();
                 }
                 AgentEvent::Error(e) => {
                     app.push_chat("error", &e, ChatStyle::Error);
+                    app.stop_timer();
                     app.state = AppState::Idle;
                     app.status = "Ready".to_string();
                     app.streaming_text.clear();
@@ -112,21 +127,30 @@ pub async fn run_tui(
                     match app.input_mode {
                         InputMode::Insert => match key.code {
                             KeyCode::Enter => {
+                                // Shift+Enter = newline, plain Enter = send
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.insert_newline();
+                                    continue;
+                                }
+
                                 let input = app.submit_input();
                                 if input.trim().is_empty() {
                                     continue;
                                 }
 
-                                if input.trim() == "/quit" || input.trim() == "/exit" {
-                                    app.running = false;
+                                // Handle slash commands locally
+                                if app.handle_slash_command(input.trim()) {
                                     continue;
                                 }
 
+                                // Regular message — send to agent
+                                app.message_count += 1;
                                 app.push_chat("you", &input, ChatStyle::User);
                                 app.state = AppState::Thinking;
                                 app.status = "Thinking...".to_string();
                                 app.streaming_text.clear();
                                 app.thinking_tick = 0;
+                                app.start_timer();
 
                                 // Spawn agent processing in background
                                 let agent_clone = agent.clone();
@@ -136,7 +160,8 @@ pub async fn run_tui(
 
                                 tokio::spawn(async move {
                                     let mut msgs = messages_clone.lock().unwrap().clone();
-                                    let result = agent_clone.process(&mut msgs, &input_owned).await;
+                                    let result =
+                                        agent_clone.process(&mut msgs, &input_owned).await;
 
                                     // Update shared messages
                                     *messages_clone.lock().unwrap() = msgs;
@@ -160,7 +185,10 @@ pub async fn run_tui(
                                                 .content
                                                 .iter()
                                                 .filter_map(|c| {
-                                                    if let ContentBlock::ToolCall { name, .. } = c {
+                                                    if let ContentBlock::ToolCall {
+                                                        name, ..
+                                                    } = c
+                                                    {
                                                         Some(name.clone())
                                                     } else {
                                                         None
@@ -168,7 +196,15 @@ pub async fn run_tui(
                                                 })
                                                 .collect();
 
-                                            AgentEvent::Response { text, tool_names }
+                                            // Estimate tokens from text (~4 chars/token)
+                                            let est_output = text.len() / 4;
+
+                                            AgentEvent::Response {
+                                                text,
+                                                tool_names,
+                                                input_tokens: 0,
+                                                output_tokens: est_output,
+                                            }
                                         }
                                         Err(e) => AgentEvent::Error(e.to_string()),
                                     };
@@ -201,11 +237,9 @@ pub async fn run_tui(
             }
             TermEvent::MouseScroll(delta) => {
                 if delta < 0 {
-                    // Scroll up
                     app.auto_scroll = false;
                     app.scroll_offset = app.scroll_offset.saturating_sub((-delta) as u16);
                 } else {
-                    // Scroll down
                     app.scroll_offset = app.scroll_offset.saturating_add(delta as u16);
                 }
             }

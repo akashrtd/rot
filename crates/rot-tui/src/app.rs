@@ -10,23 +10,23 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::time::{Duration, Instant};
 
-// ── Theme (Matrix / Phosphor Green) ───────────────────────────────────
+// ── Theme (Tokyo Night) ───────────────────────────────────────────────
 
-const COLOR_USER: Color = Color::Rgb(0, 255, 65);         // Bright Matrix green #00FF41
-const COLOR_ASSISTANT: Color = Color::Rgb(0, 255, 65);    // Bright Matrix green
-const COLOR_TOOL: Color = Color::Rgb(0, 143, 17);         // Mid green #008F11
-const COLOR_ERROR: Color = Color::Rgb(255, 50, 50);       // Red for errors
-const COLOR_SYSTEM: Color = Color::Rgb(0, 200, 50);       // System green
-const COLOR_THINKING: Color = Color::Rgb(0, 100, 0);      // Dark green pulse
-const COLOR_CODE_BG: Color = Color::Rgb(0, 20, 0);        // Near-black green tint
-const COLOR_CODE_FG: Color = Color::Rgb(0, 255, 65);      // Bright green
-const COLOR_HEADER_BG: Color = Color::Rgb(0, 10, 0);      // Deep black-green
-const COLOR_ACCENT: Color = Color::Rgb(0, 255, 65);       // Matrix green
-const COLOR_BAR_BG: Color = Color::Rgb(0, 10, 0);         // Deep black-green
-const COLOR_BAR_FG: Color = Color::Rgb(0, 143, 17);       // Mid green
-const COLOR_BORDER: Color = Color::Rgb(0, 80, 0);         // Dim green border
-const COLOR_DIM: Color = Color::Rgb(0, 100, 0);           // Muted green
-const COLOR_BANNER: Color = Color::Rgb(0, 255, 65);       // Bright green banner
+const COLOR_USER: Color = Color::Rgb(42, 195, 222);      // Cyan #2ac3de
+const COLOR_ASSISTANT: Color = Color::Rgb(115, 218, 202); // Teal #73daca
+const COLOR_TOOL: Color = Color::Rgb(187, 154, 247);      // Purple #bb9af7
+const COLOR_ERROR: Color = Color::Rgb(247, 118, 142);     // Red #f7768e
+const COLOR_SYSTEM: Color = Color::Rgb(224, 175, 104);    // Yellow #e0af68
+const COLOR_THINKING: Color = Color::Rgb(86, 95, 137);    // Comment #565f89
+const COLOR_CODE_BG: Color = Color::Rgb(26, 27, 38);      // Background #1a1b26
+const COLOR_CODE_FG: Color = Color::Rgb(192, 202, 245);   // Foreground #c0caf5
+const COLOR_HEADER_BG: Color = Color::Rgb(22, 22, 30);    // Darker bg #16161e
+const COLOR_ACCENT: Color = Color::Rgb(122, 162, 247);    // Blue #7aa2f7
+const COLOR_BAR_BG: Color = Color::Rgb(22, 22, 30);       // Darker bg #16161e
+const COLOR_BAR_FG: Color = Color::Rgb(86, 95, 137);      // Comment #565f89
+const COLOR_BORDER: Color = Color::Rgb(41, 46, 66);       // Surface #292e42
+const COLOR_DIM: Color = Color::Rgb(86, 95, 137);         // Comment #565f89
+const COLOR_BANNER: Color = Color::Rgb(122, 162, 247);    // Blue #7aa2f7
 
 // ── ASCII Art ──────────────────────────────────────────────────────────
 
@@ -562,7 +562,7 @@ impl App {
             .border_type(ratatui::widgets::BorderType::Thick);
 
         let style = match self.state {
-            AppState::Idle => Style::default().fg(COLOR_ACCENT),
+            AppState::Idle => Style::default().fg(COLOR_CODE_FG),
             AppState::Thinking | AppState::Streaming => Style::default().fg(COLOR_DIM),
             AppState::Error => Style::default().fg(COLOR_ERROR),
         };

@@ -31,11 +31,11 @@ const COLOR_BANNER: Color = Color::Rgb(203, 166, 247);    // Mauve for banner
 // ── ASCII Art ──────────────────────────────────────────────────────────
 
 const ASCII_BANNER: &str = r#"
- ╱══╲   ╱══╲  ╔════╗
- ║  ║   ║  ║  ║    ║
- ╲══╱   ╲══╱  ║    ║
- ║╲     ║  ║  ║    ║
- ║ ╲    ╲══╱  ╚════╝
+ __    ___  _____ 
+  /__\  /___\/__   \
+ / \// //  //  / /\/
+/ _  \/ \_//  / /   
+\/ \_/\___/   \/    
 "#;
 
 // Provider context window sizes (approximate)
@@ -302,23 +302,31 @@ impl App {
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
-        // Layout: header(1) | messages(flex) | context_bar(1) | input(3) | footer(1)
+        // Thick outer border around entire TUI
+        let outer_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_ACCENT))
+            .border_type(ratatui::widgets::BorderType::Thick)
+            .title(" rot ")
+            .title_style(Style::default().fg(COLOR_ACCENT).bold());
+        let inner = outer_block.inner(area);
+        frame.render_widget(outer_block, area);
+
+        // Layout: header(1) | messages(flex) | input(3) | footer(1)
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // Header
                 Constraint::Min(5),   // Messages
-                Constraint::Length(1), // Context bar
                 Constraint::Length(3), // Input
-                Constraint::Length(1), // Footer
+                Constraint::Length(1), // Footer (provider + context + tokens + cost)
             ])
-            .split(area);
+            .split(inner);
 
         self.render_header(frame, chunks[0]);
         self.render_messages(frame, chunks[1]);
-        self.render_context_bar(frame, chunks[2]);
-        self.render_input(frame, chunks[3]);
-        self.render_footer(frame, chunks[4]);
+        self.render_input(frame, chunks[2]);
+        self.render_footer(frame, chunks[3]);
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
@@ -519,71 +527,7 @@ impl App {
         frame.render_widget(paragraph, area);
     }
 
-    fn render_context_bar(&self, frame: &mut Frame, area: Rect) {
-        let total_tokens = self.total_input_tokens + self.total_output_tokens;
-        let context_window = get_context_window(&self.model);
-        let context_pct = if context_window > 0 {
-            (total_tokens as f64 / context_window as f64 * 100.0).min(100.0)
-        } else {
-            0.0
-        };
-
-        // Estimate cost (rough: $3/M input, $15/M output for Claude; much cheaper for z.ai)
-        let cost = if self.provider == "anthropic" {
-            (self.total_input_tokens as f64 * 3.0 / 1_000_000.0)
-                + (self.total_output_tokens as f64 * 15.0 / 1_000_000.0)
-        } else {
-            // z.ai is much cheaper
-            (self.total_input_tokens as f64 * 0.5 / 1_000_000.0)
-                + (self.total_output_tokens as f64 * 0.5 / 1_000_000.0)
-        };
-
-        let mut parts: Vec<Span> = vec![
-            Span::styled(" ─── ", Style::default().fg(COLOR_BORDER)),
-        ];
-
-        // Context %
-        let pct_color = if context_pct > 80.0 {
-            COLOR_ERROR
-        } else if context_pct > 50.0 {
-            COLOR_SYSTEM
-        } else {
-            COLOR_DIM
-        };
-        parts.push(Span::styled(
-            format!("context: {context_pct:.0}%"),
-            Style::default().fg(pct_color),
-        ));
-
-        parts.push(Span::styled("  │  ", Style::default().fg(COLOR_BORDER)));
-
-        // Tokens
-        parts.push(Span::styled(
-            format!("tokens: {}", Self::format_number(total_tokens)),
-            Style::default().fg(COLOR_DIM),
-        ));
-
-        // Cost (only show if > 0)
-        if cost > 0.0001 {
-            parts.push(Span::styled("  │  ", Style::default().fg(COLOR_BORDER)));
-            parts.push(Span::styled(
-                format!("cost: ${cost:.4}"),
-                Style::default().fg(COLOR_DIM),
-            ));
-        }
-
-        // Messages
-        if self.message_count > 0 {
-            parts.push(Span::styled("  │  ", Style::default().fg(COLOR_BORDER)));
-            parts.push(Span::styled(
-                format!("{} msgs", self.message_count),
-                Style::default().fg(COLOR_DIM),
-            ));
-        }
-
-        let bar = Paragraph::new(Line::from(parts));
-        frame.render_widget(bar, area);
-    }
+    // render_context_bar removed — merged into render_footer
 
     fn render_input(&self, frame: &mut Frame, area: Rect) {
         let border_color = match self.state {
@@ -640,23 +584,65 @@ impl App {
             InputMode::Normal => COLOR_DIM,
         };
 
-        let left = vec![
+        // Calculate context/token/cost stats
+        let total_tokens = self.total_input_tokens + self.total_output_tokens;
+        let context_window = get_context_window(&self.model);
+        let context_pct = if context_window > 0 {
+            (total_tokens as f64 / context_window as f64 * 100.0).min(100.0)
+        } else {
+            0.0
+        };
+        let cost = if self.provider == "anthropic" {
+            (self.total_input_tokens as f64 * 3.0 / 1_000_000.0)
+                + (self.total_output_tokens as f64 * 15.0 / 1_000_000.0)
+        } else {
+            (self.total_input_tokens as f64 * 0.5 / 1_000_000.0)
+                + (self.total_output_tokens as f64 * 0.5 / 1_000_000.0)
+        };
+
+        let pct_color = if context_pct > 80.0 {
+            COLOR_ERROR
+        } else if context_pct > 50.0 {
+            COLOR_SYSTEM
+        } else {
+            COLOR_DIM
+        };
+
+        // Left side: MODE │ provider:model │ context% │ tokens │ cost
+        let mut left = vec![
             Span::styled(format!(" {mode_str} "), Style::default().fg(Color::Black).bg(mode_color).bold()),
             Span::styled(
-                format!("  {} : {}", self.provider, self.model),
+                format!("  {}:{}", self.provider, self.model),
                 Style::default().fg(COLOR_BAR_FG),
+            ),
+            Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
+            Span::styled(
+                format!("{context_pct:.0}%"),
+                Style::default().fg(pct_color),
+            ),
+            Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
+            Span::styled(
+                format!("{}tok", Self::format_number(total_tokens)),
+                Style::default().fg(COLOR_DIM),
             ),
         ];
 
-        let right_text = "Ctrl+C quit │ /help ";
+        if cost > 0.0001 {
+            left.push(Span::styled("  │  ", Style::default().fg(COLOR_BORDER)));
+            left.push(Span::styled(
+                format!("${cost:.4}"),
+                Style::default().fg(COLOR_DIM),
+            ));
+        }
+
+        let right_text = "/help ";
         let used: usize = left.iter().map(|s| s.width()).sum::<usize>() + right_text.len();
         let pad = (area.width as usize).saturating_sub(used);
 
-        let mut spans = left;
-        spans.push(Span::raw(" ".repeat(pad)));
-        spans.push(Span::styled(right_text, Style::default().fg(COLOR_DIM)));
+        left.push(Span::raw(" ".repeat(pad)));
+        left.push(Span::styled(right_text, Style::default().fg(COLOR_DIM)));
 
-        let bar = Paragraph::new(Line::from(spans))
+        let bar = Paragraph::new(Line::from(left))
             .style(Style::default().bg(COLOR_BAR_BG));
         frame.render_widget(bar, area);
     }

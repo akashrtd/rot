@@ -31,11 +31,11 @@ const COLOR_BANNER: Color = Color::Rgb(203, 166, 247);    // Mauve for banner
 // ── ASCII Art ──────────────────────────────────────────────────────────
 
 const ASCII_BANNER: &str = r#"
- __    ___  _____ 
-  /__\  /___\/__   \
- / \// //  //  / /\/
-/ _  \/ \_//  / /   
-\/ \_/\___/   \/    
+  __    ___  _____
+   /__\  /___\/__   \
+  / \// //  //  / /\/
+ / _  \/ \_//  / /
+ \/ \_/\___/   \/
 "#;
 
 // Provider context window sizes (approximate)

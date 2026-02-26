@@ -43,12 +43,16 @@ pub struct App {
     pub streaming_text: String,
     /// Scroll offset for the messages pane.
     pub scroll_offset: u16,
+    /// Whether to auto-scroll to bottom.
+    pub auto_scroll: bool,
     /// Status bar text.
     pub status: String,
     /// Model name for display.
     pub model: String,
     /// Provider name for display.
     pub provider: String,
+    /// Thinking animation frame counter.
+    pub thinking_tick: u16,
 }
 
 /// A line in the chat display.
@@ -67,6 +71,7 @@ pub enum ChatStyle {
     System,
     Tool,
     Error,
+    Thinking,
 }
 
 impl App {
@@ -81,19 +86,22 @@ impl App {
             chat_lines: Vec::new(),
             streaming_text: String::new(),
             scroll_offset: 0,
+            auto_scroll: true,
             status: "Ready".to_string(),
             model: model.to_string(),
             provider: provider.to_string(),
+            thinking_tick: 0,
         }
     }
 
-    /// Add a chat line.
+    /// Add a chat line and auto-scroll to bottom.
     pub fn push_chat(&mut self, role: &str, content: &str, style: ChatStyle) {
         self.chat_lines.push(ChatLine {
             role: role.to_string(),
             content: content.to_string(),
             style,
         });
+        self.auto_scroll = true;
     }
 
     /// Submit the current input, returning it and clearing the buffer.
@@ -123,8 +131,13 @@ impl App {
         }
     }
 
+    /// Advance the thinking animation tick.
+    pub fn tick(&mut self) {
+        self.thinking_tick = self.thinking_tick.wrapping_add(1);
+    }
+
     /// Render the application.
-    pub fn render(&self, frame: &mut Frame) {
+    pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
         // Layout: messages (top) | input (bottom) | status bar
@@ -142,7 +155,7 @@ impl App {
         self.render_status(frame, chunks[2]);
     }
 
-    fn render_messages(&self, frame: &mut Frame, area: Rect) {
+    fn render_messages(&mut self, frame: &mut Frame, area: Rect) {
         let mut lines: Vec<Line> = Vec::new();
 
         for msg in &self.chat_lines {
@@ -152,23 +165,68 @@ impl App {
                 ChatStyle::System => Style::default().fg(Color::Yellow).bold(),
                 ChatStyle::Tool => Style::default().fg(Color::Magenta).bold(),
                 ChatStyle::Error => Style::default().fg(Color::Red).bold(),
+                ChatStyle::Thinking => Style::default().fg(Color::DarkGray).italic(),
             };
 
-            lines.push(Line::from(vec![
-                Span::styled(format!("{}: ", msg.role), role_style),
-                Span::raw(&msg.content),
-            ]));
+            // For multi-line content, wrap each line
+            let content_lines: Vec<&str> = msg.content.lines().collect();
+            if content_lines.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{}: ", msg.role), role_style),
+                    Span::raw(""),
+                ]));
+            } else {
+                for (i, content_line) in content_lines.iter().enumerate() {
+                    if i == 0 {
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("{}: ", msg.role), role_style),
+                            Span::raw(*content_line),
+                        ]));
+                    } else {
+                        // Indent continuation lines
+                        let indent = " ".repeat(msg.role.len() + 2);
+                        lines.push(Line::from(format!("{indent}{content_line}")));
+                    }
+                }
+            }
             lines.push(Line::from(""));
         }
 
-        // Show streaming text
+        // Show streaming text with animation
         if !self.streaming_text.is_empty() {
+            let stream_lines: Vec<&str> = self.streaming_text.lines().collect();
+            for (i, line) in stream_lines.iter().enumerate() {
+                if i == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            "rot: ",
+                            Style::default().fg(Color::Green).bold(),
+                        ),
+                        Span::raw(*line),
+                    ]));
+                } else {
+                    lines.push(Line::from(format!("     {line}")));
+                }
+            }
+        }
+
+        // Show thinking indicator
+        if self.state == AppState::Thinking {
+            let dots = match (self.thinking_tick / 5) % 4 {
+                0 => "   ",
+                1 => ".  ",
+                2 => ".. ",
+                _ => "...",
+            };
             lines.push(Line::from(vec![
                 Span::styled(
-                    "assistant: ",
+                    "rot: ",
                     Style::default().fg(Color::Green).bold(),
                 ),
-                Span::raw(&self.streaming_text),
+                Span::styled(
+                    format!("thinking{dots}"),
+                    Style::default().fg(Color::DarkGray).italic(),
+                ),
             ]));
         }
 
@@ -176,6 +234,14 @@ impl App {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::DarkGray))
             .title(" rot ");
+
+        // Calculate content height for auto-scroll
+        let inner_height = area.height.saturating_sub(2); // minus borders
+        let content_height = lines.len() as u16;
+
+        if self.auto_scroll && content_height > inner_height {
+            self.scroll_offset = content_height.saturating_sub(inner_height);
+        }
 
         let paragraph = Paragraph::new(lines)
             .block(block)
@@ -275,5 +341,14 @@ mod tests {
         app.push_chat("user", "Hello!", ChatStyle::User);
         assert_eq!(app.chat_lines.len(), 1);
         assert_eq!(app.chat_lines[0].content, "Hello!");
+        assert!(app.auto_scroll);
+    }
+
+    #[test]
+    fn test_auto_scroll_on_push() {
+        let mut app = App::new("test", "test");
+        app.auto_scroll = false;
+        app.push_chat("user", "Hello!", ChatStyle::User);
+        assert!(app.auto_scroll, "push_chat should enable auto_scroll");
     }
 }

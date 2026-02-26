@@ -1,4 +1,8 @@
 //! TUI runner — sets up the terminal and runs the main loop.
+//!
+//! Agent processing runs in a background tokio task so the TUI stays
+//! responsive, showing thinking animation and streaming text while
+//! the LLM generates its response.
 
 use crate::app::{App, AppState, ChatStyle, InputMode};
 use crate::event::{is_quit, poll_event, TermEvent};
@@ -9,9 +13,22 @@ use crossterm::terminal::{
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use rot_core::{Agent, AgentConfig, ContentBlock, Message};
+use tokio::sync::mpsc;
 
 use std::io::stdout;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// Messages sent from the background processing task back to the TUI.
+enum AgentEvent {
+    /// Agent finished successfully with text response.
+    Response {
+        text: String,
+        tool_names: Vec<String>,
+    },
+    /// Agent encountered an error.
+    Error(String),
+}
 
 /// Run the TUI application.
 pub async fn run_tui(
@@ -35,8 +52,7 @@ pub async fn run_tui(
         .await
         .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-    // Build agent
-
+    // Build agent (shared for background tasks)
     let config = AgentConfig {
         system_prompt: Some(
             "You are rot, a powerful AI coding assistant. \
@@ -48,14 +64,43 @@ pub async fn run_tui(
         ..Default::default()
     };
 
-    let agent = Agent::new(provider, tools, config);
-    let mut messages: Vec<Message> = Vec::new();
+    let agent = Arc::new(Agent::new(provider, tools, config));
+    let messages: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // Channel for agent results
+    let (tx, mut rx) = mpsc::unbounded_channel::<AgentEvent>();
 
     // Main loop
     while app.running {
         terminal.draw(|frame| app.render(frame))?;
 
-        match poll_event(Duration::from_millis(50))? {
+        // Check for agent completion (non-blocking)
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                AgentEvent::Response { text, tool_names } => {
+                    app.push_chat("rot", &text, ChatStyle::Assistant);
+                    for name in &tool_names {
+                        app.push_chat("tool", &format!("↳ {name}"), ChatStyle::Tool);
+                    }
+                    app.state = AppState::Idle;
+                    app.status = "Ready".to_string();
+                    app.streaming_text.clear();
+                }
+                AgentEvent::Error(e) => {
+                    app.push_chat("error", &e, ChatStyle::Error);
+                    app.state = AppState::Idle;
+                    app.status = "Ready".to_string();
+                    app.streaming_text.clear();
+                }
+            }
+        }
+
+        // Animate thinking dots
+        if app.state == AppState::Thinking || app.state == AppState::Streaming {
+            app.tick();
+        }
+
+        match poll_event(Duration::from_millis(80))? {
             TermEvent::Key(key) => {
                 if is_quit(&key) {
                     app.running = false;
@@ -80,50 +125,55 @@ pub async fn run_tui(
                                 app.state = AppState::Thinking;
                                 app.status = "Thinking...".to_string();
                                 app.streaming_text.clear();
+                                app.thinking_tick = 0;
 
-                                // Process in background
-                                let result = agent.process(&mut messages, &input).await;
+                                // Spawn agent processing in background
+                                let agent_clone = agent.clone();
+                                let messages_clone = messages.clone();
+                                let tx_clone = tx.clone();
+                                let input_owned = input.clone();
 
-                                match result {
-                                    Ok(response) => {
-                                        let text = response
-                                            .content
-                                            .iter()
-                                            .filter_map(|c| {
-                                                if let ContentBlock::Text { text } = c {
-                                                    Some(text.as_str())
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("\n");
+                                tokio::spawn(async move {
+                                    let mut msgs = messages_clone.lock().unwrap().clone();
+                                    let result = agent_clone.process(&mut msgs, &input_owned).await;
 
-                                        app.push_chat("rot", &text, ChatStyle::Assistant);
+                                    // Update shared messages
+                                    *messages_clone.lock().unwrap() = msgs;
 
-                                        // Show tool calls
-                                        for block in &response.content {
-                                            if let ContentBlock::ToolCall { name, .. } = block {
-                                                app.push_chat(
-                                                    "tool",
-                                                    &format!("↳ {name}"),
-                                                    ChatStyle::Tool,
-                                                );
-                                            }
+                                    let event = match result {
+                                        Ok(response) => {
+                                            let text = response
+                                                .content
+                                                .iter()
+                                                .filter_map(|c| {
+                                                    if let ContentBlock::Text { text } = c {
+                                                        Some(text.as_str())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                                .collect::<Vec<_>>()
+                                                .join("\n");
+
+                                            let tool_names: Vec<String> = response
+                                                .content
+                                                .iter()
+                                                .filter_map(|c| {
+                                                    if let ContentBlock::ToolCall { name, .. } = c {
+                                                        Some(name.clone())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                                .collect();
+
+                                            AgentEvent::Response { text, tool_names }
                                         }
-                                    }
-                                    Err(e) => {
-                                        app.push_chat(
-                                            "error",
-                                            &e.to_string(),
-                                            ChatStyle::Error,
-                                        );
-                                    }
-                                }
+                                        Err(e) => AgentEvent::Error(e.to_string()),
+                                    };
 
-                                app.state = AppState::Idle;
-                                app.status = "Ready".to_string();
-                                app.streaming_text.clear();
+                                    let _ = tx_clone.send(event);
+                                });
                             }
                             KeyCode::Backspace => app.backspace(),
                             KeyCode::Char(c) => app.insert_char(c),
@@ -134,10 +184,14 @@ pub async fn run_tui(
                             KeyCode::Char('i') => app.input_mode = InputMode::Insert,
                             KeyCode::Char('q') => app.running = false,
                             KeyCode::Char('k') | KeyCode::Up => {
+                                app.auto_scroll = false;
                                 app.scroll_offset = app.scroll_offset.saturating_sub(1);
                             }
                             KeyCode::Char('j') | KeyCode::Down => {
                                 app.scroll_offset = app.scroll_offset.saturating_add(1);
+                            }
+                            KeyCode::Char('G') => {
+                                app.auto_scroll = true;
                             }
                             _ => {}
                         },

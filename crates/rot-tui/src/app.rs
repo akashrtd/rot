@@ -94,6 +94,8 @@ pub struct App {
     pub last_elapsed: Option<Duration>,
     pub message_count: usize,
     pub showed_welcome: bool,
+    /// Maximum scroll offset (computed during render).
+    pub max_scroll: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +142,7 @@ impl App {
             last_elapsed: None,
             message_count: 0,
             showed_welcome: false,
+            max_scroll: 0,
         }
     }
 
@@ -514,13 +517,16 @@ impl App {
         let block = Block::default()
             .borders(Borders::NONE);
 
-        // Auto-scroll
+        // Auto-scroll + clamp
         let inner_height = area.height;
         let content_height = lines.len() as u16;
+        self.max_scroll = content_height.saturating_sub(inner_height);
 
         if self.auto_scroll && content_height > inner_height {
-            self.scroll_offset = content_height.saturating_sub(inner_height);
+            self.scroll_offset = self.max_scroll;
         }
+        // Clamp scroll to valid range
+        self.scroll_offset = self.scroll_offset.min(self.max_scroll);
 
         let paragraph = Paragraph::new(lines)
             .block(block)

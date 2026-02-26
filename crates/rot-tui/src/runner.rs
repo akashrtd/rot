@@ -225,7 +225,7 @@ pub async fn run_tui(
                                 app.scroll_offset = app.scroll_offset.saturating_sub(1);
                             }
                             KeyCode::Char('j') | KeyCode::Down => {
-                                app.scroll_offset = app.scroll_offset.saturating_add(1);
+                                app.scroll_offset = app.scroll_offset.saturating_add(1).min(app.max_scroll);
                             }
                             KeyCode::Char('G') => {
                                 app.auto_scroll = true;
@@ -240,7 +240,7 @@ pub async fn run_tui(
                     app.auto_scroll = false;
                     app.scroll_offset = app.scroll_offset.saturating_sub((-delta) as u16);
                 } else {
-                    app.scroll_offset = app.scroll_offset.saturating_add(delta as u16);
+                    app.scroll_offset = app.scroll_offset.saturating_add(delta as u16).min(app.max_scroll);
                 }
             }
             TermEvent::Resize(_, _) => {}

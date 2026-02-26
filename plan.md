@@ -1084,10 +1084,10 @@ impl PermissionSystem {
 
 #### Verification
 
-- [ ] `cargo test --package rot-core` passes
-- [ ] Test allow rules
-- [ ] Test deny rules
-- [ ] Test pattern matching
+- [x] `cargo test --package rot-core` passes
+- [x] Test allow rules
+- [x] Test deny rules
+- [x] Test pattern matching
 
 ---
 

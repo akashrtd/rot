@@ -15,6 +15,17 @@
 
 rot is a **terminal-native AI coding agent** built in Rust. Give it a task, and it reads your code, runs commands, edits files, and builds solutions — all from a single chat interface.
 
+```text
+███████████      ███████    ███████████
+░░███░░░░░███   ███░░░░░███ ░█░░░███░░░█
+ ░███    ░███  ███     ░░███░   ░███  ░
+ ░██████████  ░███      ░███    ░███
+ ░███░░░░░███ ░███      ░███    ░███
+ ░███    ░███ ░░███     ███     ░███
+ █████   █████ ░░░███████░      █████
+░░░░░   ░░░░░    ░░░░░░░       ░░░░░
+```
+
 ```
 ┌ rot ────────────────────────────────────────────────────┐
 │you: refactor the authentication module to use JWT       │

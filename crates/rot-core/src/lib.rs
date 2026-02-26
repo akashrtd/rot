@@ -3,6 +3,8 @@
 pub mod agent;
 mod error;
 pub mod message;
+pub mod permission;
+
 
 pub use agent::{Agent, AgentConfig, AgentProcessError};
 pub use error::RotError;

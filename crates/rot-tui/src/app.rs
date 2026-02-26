@@ -63,6 +63,7 @@ pub enum AppState {
     Idle,
     Thinking,
     Streaming,
+    Approval, // Paused for user permission
     Error,
 }
 
@@ -96,6 +97,11 @@ pub struct App {
     pub showed_welcome: bool,
     /// Maximum scroll offset (computed during render).
     pub max_scroll: u16,
+    
+    // Approval state
+    pub pending_approval_tool: Option<String>,
+    pub pending_approval_args: Option<serde_json::Value>,
+    pub pending_approval_tx: Option<tokio::sync::oneshot::Sender<rot_core::permission::ApprovalResponse>>,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +149,9 @@ impl App {
             message_count: 0,
             showed_welcome: false,
             max_scroll: 0,
+            pending_approval_tool: None,
+            pending_approval_args: None,
+            pending_approval_tx: None,
         }
     }
 
@@ -333,6 +342,11 @@ impl App {
         self.render_messages(frame, chunks[1]);
         self.render_input(frame, chunks[2]);
         self.render_footer(frame, chunks[3]);
+
+        // Overlay dialog
+        if self.state == AppState::Approval {
+            self.render_approval_dialog(frame, area);
+        }
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
@@ -345,6 +359,7 @@ impl App {
                 }
             }
             AppState::Streaming => "◉",
+            AppState::Approval => "⚠",
             AppState::Error => "✖",
         };
 
@@ -352,6 +367,7 @@ impl App {
             AppState::Idle => COLOR_ACCENT,
             AppState::Thinking => COLOR_THINKING,
             AppState::Streaming => COLOR_ACCENT,
+            AppState::Approval => COLOR_ERROR,
             AppState::Error => COLOR_ERROR,
         };
 
@@ -519,7 +535,7 @@ impl App {
                 InputMode::Normal => COLOR_BORDER,
             },
             AppState::Thinking | AppState::Streaming => COLOR_BORDER,
-            AppState::Error => COLOR_ERROR,
+            AppState::Approval | AppState::Error => COLOR_ERROR,
         };
 
         let prompt = match self.input_mode {
@@ -538,7 +554,7 @@ impl App {
         let style = match self.state {
             AppState::Idle => Style::default().fg(COLOR_CODE_FG),
             AppState::Thinking | AppState::Streaming => Style::default().fg(COLOR_DIM),
-            AppState::Error => Style::default().fg(COLOR_ERROR),
+            AppState::Approval | AppState::Error => Style::default().fg(COLOR_ERROR),
         };
 
         let paragraph = Paragraph::new(input_text).style(style).block(block);
@@ -629,6 +645,75 @@ impl App {
             .style(Style::default().bg(COLOR_BAR_BG));
         frame.render_widget(bar, area);
     }
+
+    fn render_approval_dialog(&self, frame: &mut Frame, area: Rect) {
+        use ratatui::layout::{Constraint, Direction, Layout};
+        use ratatui::widgets::Clear;
+
+        // Create a centered rect for the dialog
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(30),
+                Constraint::Min(10), // height of dialog
+                Constraint::Percentage(30),
+            ])
+            .split(area);
+
+        let horizontal = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(20),
+                Constraint::Min(60), // width of dialog
+                Constraint::Percentage(20),
+            ])
+            .split(vertical[1]);
+
+        let dialog_area = horizontal[1];
+        
+        // Clear background behind dialog
+        frame.render_widget(Clear, dialog_area);
+
+        let tool_name = self.pending_approval_tool.as_deref().unwrap_or("unknown");
+        let args_str = self
+            .pending_approval_args
+            .as_ref()
+            .map(|a| serde_json::to_string_pretty(a).unwrap_or_default())
+            .unwrap_or_default();
+
+        let block = Block::default()
+            .title(format!(" ⚠ Permission Request: {} ", tool_name))
+            .title_style(Style::default().fg(COLOR_ERROR).bold())
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_ERROR))
+            .border_type(ratatui::widgets::BorderType::Thick);
+
+        let mut lines = vec![
+            Line::from(Span::styled("rot wants to execute the following tool:", Style::default().fg(COLOR_CODE_FG))),
+            Line::from(""),
+        ];
+
+        for arg_line in args_str.lines() {
+            lines.push(Line::from(Span::styled(format!("  {}", arg_line), Style::default().fg(COLOR_DIM))));
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Allow this action? ", Style::default().fg(COLOR_CODE_FG)),
+            Span::styled("[y]", Style::default().fg(COLOR_ASSISTANT).bold()),
+            Span::styled(" Yes  ", Style::default().fg(COLOR_CODE_FG)),
+            Span::styled("[a]", Style::default().fg(COLOR_ASSISTANT).bold()),
+            Span::styled(" Always  ", Style::default().fg(COLOR_CODE_FG)),
+            Span::styled("[n]", Style::default().fg(COLOR_ERROR).bold()),
+            Span::styled(" No  ", Style::default().fg(COLOR_CODE_FG)),
+            Span::styled("[d]", Style::default().fg(COLOR_ERROR).bold()),
+            Span::styled(" Deny Always", Style::default().fg(COLOR_CODE_FG)),
+        ]));
+
+        let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, dialog_area);
+    }
+
 
     // ── Markdown Parser ────────────────────────────────────────────────
 

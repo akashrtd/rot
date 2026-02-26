@@ -7,12 +7,16 @@
 //! 4. Repeat until done or max iterations reached
 
 use crate::message::{ContentBlock, Message, Role};
+use crate::permission::{ApprovalResponse, PermissionSystem};
 use futures::StreamExt;
 use rot_provider::{
     Provider, ProviderContent, ProviderError, ProviderMessage, Request, StopReason, StreamEvent,
     ToolDefinition,
 };
 use rot_tools::{ToolContext, ToolRegistry};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 const MAX_ITERATIONS: usize = 50;
 
@@ -40,12 +44,24 @@ impl Default for AgentConfig {
 /// Callback for streaming events.
 pub type EventCallback = Box<dyn Fn(&StreamEvent) + Send + Sync>;
 
+/// Callback to request interactive approval from the user before running a tool.
+pub type ApprovalCallback = Box<
+    dyn Fn(
+            &str, // Tool name
+            &serde_json::Value, // Tool arguments
+        ) -> Pin<Box<dyn Future<Output = ApprovalResponse> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// The main agent that orchestrates LLM calls and tool execution.
 pub struct Agent {
     provider: Box<dyn Provider>,
     tools: ToolRegistry,
     config: AgentConfig,
     on_event: Option<EventCallback>,
+    on_approval: Option<ApprovalCallback>,
+    permission_system: Arc<Mutex<PermissionSystem>>,
 }
 
 impl Agent {
@@ -54,18 +70,27 @@ impl Agent {
         provider: Box<dyn Provider>,
         tools: ToolRegistry,
         config: AgentConfig,
+        permission_system: PermissionSystem,
     ) -> Self {
         Self {
             provider,
             tools,
             config,
             on_event: None,
+            on_approval: None,
+            permission_system: Arc::new(Mutex::new(permission_system)),
         }
     }
 
     /// Set the event callback for streaming updates.
     pub fn on_event(mut self, callback: EventCallback) -> Self {
         self.on_event = Some(callback);
+        self
+    }
+
+    /// Set the approval callback for interactive permission requests.
+    pub fn on_approval(mut self, callback: ApprovalCallback) -> Self {
+        self.on_approval = Some(callback);
         self
     }
 
@@ -175,6 +200,51 @@ impl Agent {
             for tc in &tool_calls {
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.arguments).unwrap_or(serde_json::Value::Null);
+
+                // Permission check
+                let (is_denied, requires_approval) = {
+                    let lock = self.permission_system.lock().unwrap();
+                    (lock.is_denied(&tc.name), lock.requires_approval(&tc.name))
+                };
+                
+                if is_denied {
+                    let tool_msg = Message::tool_result(
+                        tc.id.clone(),
+                        format!("Execution of '{}' is permanently denied for this session.", tc.name),
+                        true,
+                    );
+                    messages.push(tool_msg);
+                    continue;
+                }
+
+                if requires_approval {
+                    if let Some(ref approval_cb) = self.on_approval {
+                        let response = approval_cb(&tc.name, &args).await;
+                        self.permission_system.lock().unwrap().handle_response(&tc.name, &response);
+
+                        match response {
+                            ApprovalResponse::DenyOnce | ApprovalResponse::DenyAlways => {
+                                let tool_msg = Message::tool_result(
+                                    tc.id.clone(),
+                                    format!("User denied permission to run '{}'", tc.name),
+                                    true,
+                                );
+                                messages.push(tool_msg);
+                                continue;
+                            }
+                            _ => {} // Allowed, proceed to execute
+                        }
+                    } else {
+                        // If no callback is hooked up but approval is required, fail safe.
+                        let tool_msg = Message::tool_result(
+                            tc.id.clone(),
+                            format!("Cannot execute '{}': No interactive approval handler configured.", tc.name),
+                            true,
+                        );
+                        messages.push(tool_msg);
+                        continue;
+                    }
+                }
 
                 let result = if let Some(tool) = self.tools.get(&tc.name) {
                     match tool.execute(args, &tool_ctx).await {
@@ -305,6 +375,7 @@ mod tests {
             Box::new(DummyProvider),
             ToolRegistry::new(),
             AgentConfig::default(),
+            crate::permission::PermissionSystem::default(),
         );
 
         let messages = vec![

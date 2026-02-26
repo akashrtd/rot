@@ -1,6 +1,6 @@
 //! Single-shot exec command.
 
-use rot_core::{Agent, AgentConfig, ContentBlock, Message};
+use rot_core::{Agent, AgentConfig, ContentBlock, Message, permission::PermissionSystem};
 use rot_provider::{AnthropicProvider, Provider, new_zai_provider};
 use rot_tools::ToolRegistry;
 
@@ -18,7 +18,7 @@ pub async fn run(prompt: &str, model: Option<&str>, provider_name: &str) -> anyh
         ..Default::default()
     };
 
-    let agent = Agent::new(provider, tools, config);
+    let agent = Agent::new(provider, tools, config, PermissionSystem::default());
     let mut messages: Vec<Message> = Vec::new();
 
     let response = agent.process(&mut messages, prompt).await?;

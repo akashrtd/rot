@@ -1,6 +1,7 @@
 //! Glob tool — file pattern matching with .gitignore awareness.
 
 use crate::error::ToolError;
+use crate::path_guard::workspace_root;
 use crate::traits::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use ignore::WalkBuilder;
@@ -40,11 +41,12 @@ impl Tool for GlobTool {
     ) -> Result<ToolResult, ToolError> {
         let params: GlobParams = serde_json::from_value(args)
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
+        let root = workspace_root(&ctx.working_dir)?;
 
         let glob_pattern = glob::Pattern::new(&params.pattern)
             .map_err(|e| ToolError::InvalidParameters(format!("Invalid glob pattern: {e}")))?;
 
-        let walker = WalkBuilder::new(&ctx.working_dir)
+        let walker = WalkBuilder::new(&root)
             .git_ignore(true)
             .hidden(false)
             .build();
@@ -52,7 +54,7 @@ impl Tool for GlobTool {
         let mut matches: Vec<String> = Vec::new();
         for entry in walker.flatten() {
             if entry.file_type().is_some_and(|ft| ft.is_file()) {
-                if let Ok(rel) = entry.path().strip_prefix(&ctx.working_dir) {
+                if let Ok(rel) = entry.path().strip_prefix(&root) {
                     let rel_str = rel.to_string_lossy();
                     if glob_pattern.matches(&rel_str) {
                         matches.push(rel_str.to_string());

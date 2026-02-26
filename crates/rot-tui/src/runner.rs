@@ -4,7 +4,7 @@
 //! responsive, showing thinking animation and streaming text while
 //! the LLM generates its response.
 
-use crate::app::{App, AppState, ChatStyle, InputMode};
+use crate::app::{App, AppState, ChatStyle, InputMode, ConfigUiState};
 use crate::event::{is_quit, poll_event, TermEvent};
 use crossterm::event::{EnableMouseCapture, DisableMouseCapture, KeyCode, KeyModifiers};
 use crossterm::terminal::{
@@ -12,7 +12,7 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
-use rot_core::permission::{ApprovalResponse, PermissionSystem};
+use rot_core::permission::ApprovalResponse;
 use rot_core::{Agent, AgentConfig, ContentBlock, Message};
 use tokio::sync::{mpsc, oneshot};
 
@@ -36,6 +36,8 @@ enum AgentEvent {
     },
     /// Agent encountered an error.
     Error(String),
+    /// Iterative progress update from background task.
+    Progress(String),
 }
 
 /// Run the TUI application.
@@ -45,6 +47,7 @@ pub async fn run_tui(
     session_store: rot_session::SessionStore,
     model: &str,
     provider_name: &str,
+    runtime_security: rot_core::RuntimeSecurityConfig,
 ) -> std::io::Result<()> {
     // Setup terminal
     enable_raw_mode()?;
@@ -80,16 +83,23 @@ pub async fn run_tui(
     // Channel for agent results
     let (tx, mut rx) = mpsc::unbounded_channel::<AgentEvent>();
 
-    // Build agent with permission system
-    let permission_system = PermissionSystem::default();
-    
+    let config_store = rot_core::config::ConfigStore::new();
+
     // We clone tx to use it inside the on_approval callback
     let approval_tx = tx.clone();
+    let approval_tx_clone = approval_tx.clone();
+    let runtime_security_for_agent = runtime_security.clone();
 
-    let agent = Arc::new(
-        Agent::new(provider, tools, config, permission_system).on_approval(Box::new(
+    let mut agent = Arc::new(
+        Agent::new(
+            provider,
+            tools.clone(),
+            config.clone(),
+            runtime_security_for_agent,
+        )
+        .on_approval(Box::new(
             move |tool_name, args| {
-                let tx_clone = approval_tx.clone();
+                let tx_clone = approval_tx_clone.clone();
                 let tool_name = tool_name.to_string();
                 let args = args.clone();
                 Box::pin(async move {
@@ -106,6 +116,20 @@ pub async fn run_tui(
     );
     
     let messages: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // Check if the current provider needs an API key on first launch
+    let has_key = config_store.load().api_keys.get(app.provider.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
+        || std::env::var(&format!("{}_API_KEY", app.provider.to_uppercase())).is_ok();
+
+    if !has_key {
+        app.state = AppState::Config;
+        app.config_ui_state = ConfigUiState::InputKey {
+            provider: app.provider.clone(),
+            model: app.model.clone(),
+            input: String::new(),
+            cursor_pos: 0,
+        };
+    }
 
     // Main loop
     while app.running {
@@ -128,6 +152,7 @@ pub async fn run_tui(
                     app.stop_timer();
                     app.record_tokens(input_tokens, output_tokens);
                     app.state = AppState::Idle;
+                    app.rlm_iterating = false;
                     app.status = "Ready".to_string();
                     app.streaming_text.clear();
                 }
@@ -141,8 +166,12 @@ pub async fn run_tui(
                     app.push_chat("error", &e, ChatStyle::Error);
                     app.stop_timer();
                     app.state = AppState::Idle;
+                    app.rlm_iterating = false;
                     app.status = "Ready".to_string();
                     app.streaming_text.clear();
+                }
+                AgentEvent::Progress(_msg) => {
+                    app.rlm_iterating = true;
                 }
             }
         }
@@ -181,6 +210,54 @@ pub async fn run_tui(
                     continue; // Skip normal key handling while in approval mode
                 }
 
+                if app.state == AppState::Config {
+                    app.handle_config_key(key.code, &config_store);
+
+                    if app.config_changed {
+                        app.config_changed = false;
+                        match create_provider(&app.provider, &app.model) {
+                            Ok(new_provider) => {
+                                let tx_clone = approval_tx.clone();
+                agent = Arc::new(
+                                    Agent::new(
+                                        new_provider,
+                                        tools.clone(),
+                                        config.clone(),
+                                        runtime_security.clone(),
+                                    )
+                                    .on_approval(Box::new(move |tool_name, args| {
+                                        let t_clone = tx_clone.clone();
+                                        let tool_name = tool_name.to_string();
+                                        let args = args.clone();
+                                        Box::pin(async move {
+                                            let (res_tx, res_rx) = oneshot::channel();
+                                            let _ = t_clone.send(AgentEvent::ApprovalRequest {
+                                                tool_name,
+                                                args,
+                                                tx: res_tx,
+                                            });
+                                            res_rx.await.unwrap_or(ApprovalResponse::DenyOnce)
+                                        })
+                                    })),
+                                );
+                                app.push_chat(
+                                    "system",
+                                    &format!("Switched model to {} / {}", app.provider, app.model),
+                                    ChatStyle::System,
+                                );
+                            }
+                            Err(e) => {
+                                app.push_chat(
+                                    "error",
+                                    &format!("Failed to switch model: {}", e),
+                                    ChatStyle::Error,
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 if app.state == AppState::Idle {
                     match app.input_mode {
                         InputMode::Insert => match key.code {
@@ -189,6 +266,17 @@ pub async fn run_tui(
                                 if key.modifiers.contains(KeyModifiers::SHIFT) {
                                     app.insert_newline();
                                     continue;
+                                }
+
+                                if app.is_slash_menu_active() {
+                                    if let Some(selected) = app.selected_slash_command() {
+                                        if app.handle_slash_command(selected) {
+                                            app.input.clear();
+                                            app.cursor_pos = 0;
+                                            app.sync_slash_menu_selection();
+                                            continue;
+                                        }
+                                    }
                                 }
 
                                 let input = app.submit_input();
@@ -205,7 +293,7 @@ pub async fn run_tui(
                                 app.message_count += 1;
                                 app.push_chat("you", &input, ChatStyle::User);
                                 app.state = AppState::Thinking;
-                                app.status = "Thinking...".to_string();
+                                app.status = if app.rlm_enabled { "RLM Thinking...".to_string() } else { "Thinking...".to_string() };
                                 app.streaming_text.clear();
                                 app.thinking_tick = 0;
                                 app.start_timer();
@@ -214,17 +302,43 @@ pub async fn run_tui(
                                 let agent_clone = agent.clone();
                                 let messages_clone = messages.clone();
                                 let tx_clone = tx.clone();
+                                let progress_tx = tx.clone();
                                 let input_owned = input.clone();
+                                let is_rlm = app.rlm_enabled;
+                                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
                                 tokio::spawn(async move {
-                                    let mut msgs = messages_clone.lock().unwrap().clone();
-                                    let result =
-                                        agent_clone.process(&mut msgs, &input_owned).await;
+                                    if is_rlm {
+                                        let mut rlm_config = rot_rlm::RlmConfig::default();
+                                        rlm_config.on_progress = Some(Arc::new(move |msg: String| {
+                                            let _ = progress_tx.send(AgentEvent::Progress(msg));
+                                        }));
+                                        
+                                        let mut engine = rot_rlm::RlmEngine::new(rlm_config, agent_clone);
+                                        let result = engine.process(&input_owned, cwd.to_str().unwrap_or(".")).await;
+                                        
+                                        match result {
+                                            Ok(ans) => {
+                                                let _ = tx_clone.send(AgentEvent::Response {
+                                                    text: ans,
+                                                    tool_names: vec!["RLM Loop".to_string()],
+                                                    input_tokens: 0,
+                                                    output_tokens: 0, // Need accurate count later
+                                                });
+                                            }
+                                            Err(e) => {
+                                                let _ = tx_clone.send(AgentEvent::Error(format!("RLM Error: {}", e)));
+                                            }
+                                        }
+                                    } else {
+                                        let mut msgs = messages_clone.lock().unwrap().clone();
+                                        let result =
+                                            agent_clone.process(&mut msgs, &input_owned).await;
 
-                                    // Update shared messages
-                                    *messages_clone.lock().unwrap() = msgs;
+                                        // Update shared messages
+                                        *messages_clone.lock().unwrap() = msgs;
 
-                                    let event = match result {
+                                        let event = match result {
                                         Ok(response) => {
                                             let text = response
                                                 .content
@@ -268,9 +382,20 @@ pub async fn run_tui(
                                     };
 
                                     let _ = tx_clone.send(event);
+                                    } // End if !is_rlm
                                 });
                             }
                             KeyCode::Backspace => app.backspace(),
+                            KeyCode::Up => {
+                                if app.is_slash_menu_active() {
+                                    app.move_slash_selection_up();
+                                }
+                            }
+                            KeyCode::Down => {
+                                if app.is_slash_menu_active() {
+                                    app.move_slash_selection_down();
+                                }
+                            }
                             KeyCode::Char(c) => app.insert_char(c),
                             KeyCode::Esc => app.input_mode = InputMode::Normal,
                             _ => {}
@@ -311,4 +436,33 @@ pub async fn run_tui(
     stdout().execute(DisableMouseCapture)?;
     stdout().execute(LeaveAlternateScreen)?;
     Ok(())
+}
+
+// Helper to rebuild provider mid-session when configuration details change
+fn create_provider(provider_name: &str, model: &str) -> std::result::Result<Box<dyn rot_provider::Provider>, String> {
+    use rot_provider::Provider;
+    match provider_name {
+        "anthropic" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
+            let mut provider = rot_provider::AnthropicProvider::new(api_key);
+            provider.set_model(model).map_err(|e| e.to_string())?;
+            Ok(Box::new(provider))
+        }
+        "zai" => {
+            let api_key = std::env::var("ZAI_API_KEY")
+                .map_err(|_| "ZAI_API_KEY not set".to_string())?;
+            let mut provider = rot_provider::new_zai_provider(api_key);
+            provider.set_model(model).map_err(|e| e.to_string())?;
+            Ok(Box::new(provider))
+        }
+        "openai" => {
+            let api_key = std::env::var("OPENAI_API_KEY")
+                .map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+            let mut provider = rot_provider::new_openai_provider(api_key);
+            provider.set_model(model).map_err(|e| e.to_string())?;
+            Ok(Box::new(provider))
+        }
+        other => Err(format!("Unknown provider: {}", other)),
+    }
 }

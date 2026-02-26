@@ -13,8 +13,9 @@ rot-session = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror = { workspace = true }
 tracing = { workspace = true }
 ulid = { workspace = true }
+dirs.workspace = true

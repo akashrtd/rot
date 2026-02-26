@@ -1,6 +1,7 @@
 //! Grep tool — content search with regex support.
 
 use crate::error::ToolError;
+use crate::path_guard::workspace_root;
 use crate::traits::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use ignore::WalkBuilder;
@@ -50,6 +51,7 @@ impl Tool for GrepTool {
     ) -> Result<ToolResult, ToolError> {
         let params: GrepParams = serde_json::from_value(args)
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
+        let root = workspace_root(&ctx.working_dir)?;
 
         let re = Regex::new(&params.pattern)
             .map_err(|e| ToolError::InvalidParameters(format!("Invalid regex: {e}")))?;
@@ -64,7 +66,7 @@ impl Tool for GrepTool {
         let before = params.before_context.unwrap_or(0);
         let after = params.after_context.unwrap_or(0);
 
-        let walker = WalkBuilder::new(&ctx.working_dir)
+        let walker = WalkBuilder::new(&root)
             .git_ignore(true)
             .hidden(false)
             .build();
@@ -81,7 +83,7 @@ impl Tool for GrepTool {
             }
 
             let path = entry.path();
-            let rel = match path.strip_prefix(&ctx.working_dir) {
+            let rel = match path.strip_prefix(&root) {
                 Ok(r) => r,
                 Err(_) => continue,
             };

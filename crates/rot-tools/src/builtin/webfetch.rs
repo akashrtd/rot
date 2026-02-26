@@ -1,7 +1,7 @@
 //! WebFetch tool — fetch URL content.
 
 use crate::error::ToolError;
-use crate::traits::{Tool, ToolContext, ToolResult};
+use crate::traits::{SandboxMode, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,12 @@ impl Tool for WebFetchTool {
         args: serde_json::Value,
         ctx: &ToolContext,
     ) -> Result<ToolResult, ToolError> {
+        if !ctx.network_access && ctx.sandbox_mode != SandboxMode::DangerFullAccess {
+            return Err(ToolError::PermissionDenied(
+                "webfetch is disabled because sandbox network access is off".to_string(),
+            ));
+        }
+
         let params: WebFetchParams = serde_json::from_value(args)
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
 
@@ -103,5 +109,18 @@ mod tests {
         let schema = tool.parameters_schema();
         assert!(schema.get("properties").is_some());
         assert!(schema["properties"]["url"].is_object());
+    }
+
+    #[tokio::test]
+    async fn test_webfetch_denied_when_network_disabled() {
+        let ctx = ToolContext {
+            network_access: false,
+            sandbox_mode: SandboxMode::WorkspaceWrite,
+            ..Default::default()
+        };
+        let result = WebFetchTool
+            .execute(serde_json::json!({"url":"https://example.com"}), &ctx)
+            .await;
+        assert!(matches!(result, Err(ToolError::PermissionDenied(_))));
     }
 }

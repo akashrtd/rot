@@ -1,17 +1,41 @@
-use rot_provider::{AnthropicProvider, Provider, new_zai_provider};
+use rot_provider::{AnthropicProvider, Provider, new_openai_provider, new_zai_provider};
 use rot_session::SessionStore;
 use rot_tools::ToolRegistry;
 
 /// Run interactive chat mode.
-pub async fn run(model: Option<&str>, provider_name: &str) -> anyhow::Result<()> {
-    let provider = create_provider(provider_name, model)?;
-    let model_name = provider.current_model().to_string();
+pub async fn run(
+    model: Option<&str>,
+    provider_name: &str,
+    runtime_security: rot_core::RuntimeSecurityConfig,
+) -> anyhow::Result<()> {
     let mut tools = ToolRegistry::new();
     rot_tools::register_all(&mut tools);
 
+    let config_store = rot_core::config::ConfigStore::new();
+    config_store.hydrate_env();
+    let config = config_store.load();
+
+    // If no provider or model were specified, fall back to the config store
+    let final_provider = if provider_name.is_empty() {
+        &config.provider
+    } else {
+        provider_name
+    };
+
+    let final_model = model.unwrap_or(&config.model);
+    let provider = create_provider(final_provider, Some(final_model))?;
+    let model_name = provider.current_model().to_string();
+
     let session_store = SessionStore::new();
 
-    rot_tui::run_tui(provider, tools, session_store, &model_name, provider_name)
+    rot_tui::run_tui(
+        provider,
+        tools,
+        session_store,
+        &model_name,
+        provider_name,
+        runtime_security,
+    )
         .await
         .map_err(|e| anyhow::anyhow!("TUI error: {e}"))?;
 
@@ -24,38 +48,31 @@ fn create_provider(
 ) -> anyhow::Result<Box<dyn Provider>> {
     match provider_name {
         "anthropic" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-                anyhow::anyhow!(
-                    "ANTHROPIC_API_KEY not set. Set it with:\n  \
-                     export ANTHROPIC_API_KEY=your-key-here"
-                )
-            })?;
+            let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
             let mut provider = AnthropicProvider::new(api_key);
             if let Some(m) = model {
-                provider
-                    .set_model(m)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                let _ = provider.set_model(m);
             }
             Ok(Box::new(provider))
         }
         "zai" => {
-            let api_key = std::env::var("ZAI_API_KEY").map_err(|_| {
-                anyhow::anyhow!(
-                    "ZAI_API_KEY not set. Set it with:\n  \
-                     export ZAI_API_KEY=your-key-here\n\n\
-                     Get your key from https://z.ai"
-                )
-            })?;
+            let api_key = std::env::var("ZAI_API_KEY").unwrap_or_default();
             let mut provider = new_zai_provider(api_key);
             if let Some(m) = model {
-                provider
-                    .set_model(m)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                let _ = provider.set_model(m);
+            }
+            Ok(Box::new(provider))
+        }
+        "openai" => {
+            let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
+            let mut provider = new_openai_provider(api_key);
+            if let Some(m) = model {
+                let _ = provider.set_model(m);
             }
             Ok(Box::new(provider))
         }
         other => Err(anyhow::anyhow!(
-            "Unknown provider: {other}. Available: anthropic, zai"
+            "Unknown provider: {other}. Available: anthropic, zai, openai"
         )),
     }
 }

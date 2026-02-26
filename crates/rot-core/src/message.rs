@@ -94,6 +94,8 @@ pub enum ContentBlock {
         tool_call_id: String,
         content: String,
         is_error: bool,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        metadata: serde_json::Value,
     },
 
     /// Model thinking/reasoning (extended thinking).
@@ -173,6 +175,21 @@ impl Message {
         content: impl Into<String>,
         is_error: bool,
     ) -> Self {
+        Self::tool_result_with_metadata(
+            tool_call_id,
+            content,
+            is_error,
+            serde_json::Value::Null,
+        )
+    }
+
+    /// Create a tool result message with structured metadata.
+    pub fn tool_result_with_metadata(
+        tool_call_id: impl Into<String>,
+        content: impl Into<String>,
+        is_error: bool,
+        metadata: serde_json::Value,
+    ) -> Self {
         Self {
             id: MessageId::new(),
             role: Role::Tool,
@@ -180,6 +197,7 @@ impl Message {
                 tool_call_id: tool_call_id.into(),
                 content: content.into(),
                 is_error,
+                metadata,
             }],
             timestamp: Self::now_timestamp(),
             parent_id: None,
@@ -256,10 +274,12 @@ mod tests {
                 tool_call_id,
                 content,
                 is_error,
+                metadata,
             } => {
                 assert_eq!(tool_call_id, "call-1");
                 assert_eq!(content, "file contents here");
                 assert!(!is_error);
+                assert!(metadata.is_null());
             }
             _ => panic!("Expected ToolResult content block"),
         }

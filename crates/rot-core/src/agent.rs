@@ -8,6 +8,7 @@
 
 use crate::message::{ContentBlock, Message, Role};
 use crate::permission::{ApprovalResponse, PermissionSystem};
+use crate::security::{RuntimeSecurityConfig, SandboxMode};
 use futures::StreamExt;
 use rot_provider::{
     Provider, ProviderContent, ProviderError, ProviderMessage, Request, StopReason, StreamEvent,
@@ -59,6 +60,7 @@ pub struct Agent {
     provider: Box<dyn Provider>,
     tools: ToolRegistry,
     config: AgentConfig,
+    runtime_security: RuntimeSecurityConfig,
     on_event: Option<EventCallback>,
     on_approval: Option<ApprovalCallback>,
     permission_system: Arc<Mutex<PermissionSystem>>,
@@ -70,12 +72,14 @@ impl Agent {
         provider: Box<dyn Provider>,
         tools: ToolRegistry,
         config: AgentConfig,
-        permission_system: PermissionSystem,
+        runtime_security: RuntimeSecurityConfig,
     ) -> Self {
+        let permission_system = PermissionSystem::new(runtime_security.approval_policy);
         Self {
             provider,
             tools,
             config,
+            runtime_security,
             on_event: None,
             on_approval: None,
             permission_system: Arc::new(Mutex::new(permission_system)),
@@ -107,7 +111,18 @@ impl Agent {
         let user_msg = Message::user(user_input);
         messages.push(user_msg);
 
-        let tool_ctx = ToolContext::default();
+        let tool_ctx = ToolContext {
+            working_dir: std::env::current_dir().unwrap_or_default(),
+            session_id: String::new(),
+            timeout: std::time::Duration::from_secs(120),
+            sandbox_mode: match self.runtime_security.sandbox_mode {
+                SandboxMode::ReadOnly => rot_tools::SandboxMode::ReadOnly,
+                SandboxMode::WorkspaceWrite => rot_tools::SandboxMode::WorkspaceWrite,
+                SandboxMode::DangerFullAccess => rot_tools::SandboxMode::DangerFullAccess,
+            },
+            network_access: self.runtime_security.sandbox_network_access
+                || self.runtime_security.sandbox_mode == SandboxMode::DangerFullAccess,
+        };
 
         for _iteration in 0..self.config.max_iterations {
             // Build provider request
@@ -255,8 +270,12 @@ impl Agent {
                     rot_tools::ToolResult::error(format!("Unknown tool: {}", tc.name))
                 };
 
-                let tool_msg =
-                    Message::tool_result(tc.id.clone(), result.output, result.is_error);
+                let tool_msg = Message::tool_result_with_metadata(
+                    tc.id.clone(),
+                    result.output,
+                    result.is_error,
+                    result.metadata,
+                );
                 messages.push(tool_msg);
             }
 
@@ -301,6 +320,7 @@ impl Agent {
                             tool_call_id,
                             content,
                             is_error,
+                            ..
                         } => ProviderContent::ToolResult {
                             tool_call_id: tool_call_id.clone(),
                             content: content.clone(),
@@ -375,7 +395,10 @@ mod tests {
             Box::new(DummyProvider),
             ToolRegistry::new(),
             AgentConfig::default(),
-            crate::permission::PermissionSystem::default(),
+            RuntimeSecurityConfig {
+                approval_policy: crate::security::ApprovalPolicy::Never,
+                ..RuntimeSecurityConfig::default()
+            },
         );
 
         let messages = vec![

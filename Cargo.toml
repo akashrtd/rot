@@ -4,6 +4,7 @@ members = [
     "crates/rot-core",
     "crates/rot-rlm",
     "crates/rot-provider",
+    "crates/rot-sandbox",
     "crates/rot-tools",
     "crates/rot-tui",
     "crates/rot-plugin",
@@ -37,6 +38,7 @@ reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
 
 # Schema
 schemars = "0.8"
+jsonschema = "0.33"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
@@ -66,6 +68,7 @@ tokio-test = "0.4"
 rot-core = { path = "crates/rot-core" }
 rot-rlm = { path = "crates/rot-rlm" }
 rot-provider = { path = "crates/rot-provider" }
+rot-sandbox = { path = "crates/rot-sandbox" }
 rot-tools = { path = "crates/rot-tools" }
 rot-tui = { path = "crates/rot-tui" }
 rot-plugin = { path = "crates/rot-plugin" }

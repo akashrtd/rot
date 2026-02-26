@@ -7,6 +7,7 @@ pub mod types;
 
 pub use error::ProviderError;
 pub use providers::anthropic::AnthropicProvider;
+pub use providers::openai::new_openai_provider;
 pub use providers::openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider};
 pub use providers::zai::new_zai_provider;
 pub use traits::Provider;

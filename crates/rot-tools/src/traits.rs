@@ -6,6 +6,24 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Filesystem sandbox mode for tool execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxMode {
+    /// Read-only workspace access.
+    ReadOnly,
+    /// Allow workspace writes, deny writes outside workspace.
+    WorkspaceWrite,
+    /// No sandbox restrictions.
+    DangerFullAccess,
+}
+
+impl Default for SandboxMode {
+    fn default() -> Self {
+        Self::WorkspaceWrite
+    }
+}
+
 /// Context provided to tools during execution.
 #[derive(Debug, Clone)]
 pub struct ToolContext {
@@ -15,6 +33,10 @@ pub struct ToolContext {
     pub session_id: String,
     /// Execution timeout.
     pub timeout: Duration,
+    /// Filesystem sandbox mode.
+    pub sandbox_mode: SandboxMode,
+    /// Whether outbound network access is allowed.
+    pub network_access: bool,
 }
 
 impl Default for ToolContext {
@@ -23,6 +45,8 @@ impl Default for ToolContext {
             working_dir: std::env::current_dir().unwrap_or_default(),
             session_id: String::new(),
             timeout: Duration::from_secs(120),
+            sandbox_mode: SandboxMode::WorkspaceWrite,
+            network_access: false,
         }
     }
 }

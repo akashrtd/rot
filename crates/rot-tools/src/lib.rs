@@ -2,10 +2,11 @@
 
 pub mod builtin;
 mod error;
+mod path_guard;
 pub mod registry;
 pub mod traits;
 
 pub use builtin::register_all;
 pub use error::ToolError;
 pub use registry::ToolRegistry;
-pub use traits::{Tool, ToolContext, ToolResult};
+pub use traits::{SandboxMode, Tool, ToolContext, ToolResult};

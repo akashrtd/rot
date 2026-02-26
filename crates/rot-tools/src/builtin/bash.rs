@@ -1,11 +1,11 @@
 //! Bash tool — shell command execution.
 
 use crate::error::ToolError;
-use crate::traits::{Tool, ToolContext, ToolResult};
+use crate::traits::{SandboxMode, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
+use rot_sandbox::{SandboxPolicy, run_shell_command};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 
 const MAX_OUTPUT_BYTES: usize = 50 * 1024; // 50KB
 
@@ -47,30 +47,30 @@ impl Tool for BashTool {
         let timeout_secs = params.timeout.unwrap_or(ctx.timeout.as_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
 
-        // Determine shell
-        let (shell, flag) = if cfg!(target_os = "windows") {
-            ("cmd", "/C")
-        } else {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
-            // Leak is fine here — it's a static-lifetime binary path stored once
-            (shell.leak() as &str, "-c")
+        let policy = SandboxPolicy {
+            mode: match ctx.sandbox_mode {
+                SandboxMode::ReadOnly => rot_sandbox::SandboxMode::ReadOnly,
+                SandboxMode::WorkspaceWrite => rot_sandbox::SandboxMode::WorkspaceWrite,
+                SandboxMode::DangerFullAccess => rot_sandbox::SandboxMode::DangerFullAccess,
+            },
+            network_access: ctx.network_access,
         };
 
-        let output = tokio::time::timeout(
-            timeout,
-            Command::new(shell)
-                .arg(flag)
-                .arg(&params.command)
-                .current_dir(&ctx.working_dir)
-                .output(),
-        )
-        .await
-        .map_err(|_| ToolError::Timeout(format!("Command timed out after {timeout_secs}s")))?
-        .map_err(|e| ToolError::ExecutionError(format!("Failed to execute command: {e}")))?;
+        let output = run_shell_command(&params.command, &ctx.working_dir, timeout, &policy)
+            .await
+            .map_err(|e| match e {
+                rot_sandbox::SandboxError::Timeout(_) => {
+                    ToolError::Timeout(format!("Command timed out after {timeout_secs}s"))
+                }
+                rot_sandbox::SandboxError::BackendUnavailable(msg) => {
+                    ToolError::PermissionDenied(msg)
+                }
+                other => ToolError::ExecutionError(other.to_string()),
+            })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let exit_code = output.status.code().unwrap_or(-1);
+        let exit_code = output.exit_code;
 
         let mut text = String::new();
         if !stdout.is_empty() {
@@ -94,7 +94,7 @@ impl Tool for BashTool {
             text = "(no output)".to_string();
         }
 
-        let is_error = !output.status.success();
+        let is_error = !output.success;
         if is_error {
             text = format!("Exit code: {exit_code}\n{text}");
         }
@@ -115,6 +115,7 @@ mod tests {
     fn test_ctx(dir: &TempDir) -> ToolContext {
         ToolContext {
             working_dir: dir.path().to_path_buf(),
+            sandbox_mode: SandboxMode::DangerFullAccess,
             ..Default::default()
         }
     }

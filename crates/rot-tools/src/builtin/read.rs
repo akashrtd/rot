@@ -1,6 +1,7 @@
 //! Read file tool — reads file contents with optional offset/limit.
 
 use crate::error::ToolError;
+use crate::path_guard::resolve_existing_path;
 use crate::traits::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -28,32 +29,6 @@ pub struct ReadParams {
 
 pub struct ReadTool;
 
-/// Validate that a resolved path is within the working directory.
-fn validate_path(path: &Path, working_dir: &Path) -> Result<std::path::PathBuf, ToolError> {
-    let resolved = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        working_dir.join(path)
-    };
-
-    let canonical = resolved
-        .canonicalize()
-        .map_err(|e| ToolError::ExecutionError(format!("Cannot resolve path: {e}")))?;
-
-    let canonical_wd = working_dir
-        .canonicalize()
-        .map_err(|e| ToolError::ExecutionError(format!("Cannot resolve working dir: {e}")))?;
-
-    if !canonical.starts_with(&canonical_wd) {
-        return Err(ToolError::PermissionDenied(format!(
-            "Path '{}' is outside the working directory",
-            path.display()
-        )));
-    }
-
-    Ok(canonical)
-}
-
 #[async_trait]
 impl Tool for ReadTool {
     fn name(&self) -> &str {
@@ -78,7 +53,7 @@ impl Tool for ReadTool {
         let params: ReadParams = serde_json::from_value(args)
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
 
-        let path = validate_path(Path::new(&params.path), &ctx.working_dir)?;
+        let path = resolve_existing_path(Path::new(&params.path), &ctx.working_dir)?;
 
         let content = tokio::fs::read_to_string(&path)
             .await

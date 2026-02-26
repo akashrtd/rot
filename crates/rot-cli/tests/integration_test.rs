@@ -3,7 +3,7 @@
 //! These tests verify that the core components work together correctly
 //! without requiring a live API key.
 
-use rot_core::{Agent, AgentConfig, ContentBlock, Message};
+use rot_core::{Agent, AgentConfig, ContentBlock, Message, RuntimeSecurityConfig};
 use rot_provider::*;
 use rot_tools::ToolRegistry;
 
@@ -80,7 +80,7 @@ async fn test_agent_with_mock_provider() {
         ..Default::default()
     };
 
-    let agent = Agent::new(provider, tools, config);
+    let agent = Agent::new(provider, tools, config, RuntimeSecurityConfig::default());
     let mut messages: Vec<Message> = Vec::new();
 
     let response = agent.process(&mut messages, "hello").await;
@@ -109,7 +109,7 @@ async fn test_agent_with_tools_registered() {
     rot_tools::register_all(&mut tools);
 
     let config = AgentConfig::default();
-    let agent = Agent::new(provider, tools, config);
+    let agent = Agent::new(provider, tools, config, RuntimeSecurityConfig::default());
     let mut messages: Vec<Message> = Vec::new();
 
     let response = agent.process(&mut messages, "test with tools").await;

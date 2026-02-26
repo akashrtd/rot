@@ -7,7 +7,7 @@
 //! - Clean minimal layout: header | messages | context bar | input | footer
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use std::time::{Duration, Instant};
 
 // ── Theme (Tokyo Night) ───────────────────────────────────────────────
@@ -66,8 +66,41 @@ pub enum AppState {
     Thinking,
     Streaming,
     Approval, // Paused for user permission
+    Config,   // Model & API Key overlay
     Error,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigUiState {
+    List(usize), // index of selected model
+    InputKey { provider: String, model: String, input: String, cursor_pos: usize },
+}
+
+impl Default for ConfigUiState {
+    fn default() -> Self {
+        Self::List(0)
+    }
+}
+
+pub const AVAILABLE_MODELS: &[(&str, &str)] = &[
+    ("anthropic", "claude-3-7-sonnet-latest"),
+    ("anthropic", "claude-3-5-sonnet-latest"),
+    ("anthropic", "claude-3-5-haiku-latest"),
+    ("zai", "glm-5"),
+    ("zai", "glm-4.7"),
+    ("openai", "gpt-4o"),
+    ("openai", "gpt-4o-mini"),
+];
+
+pub const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("/help", "Show help"),
+    ("/clear", "Clear conversation"),
+    ("/models", "Switch model"),
+    ("/model", "Switch model"),
+    ("/rlm", "Toggle RLM"),
+    ("/quit", "Exit app"),
+    ("/exit", "Exit app"),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
@@ -104,6 +137,13 @@ pub struct App {
     pub pending_approval_tool: Option<String>,
     pub pending_approval_args: Option<serde_json::Value>,
     pub pending_approval_tx: Option<tokio::sync::oneshot::Sender<rot_core::permission::ApprovalResponse>>,
+    pub rlm_enabled: bool,
+    pub rlm_iterating: bool,
+    
+    // Config state
+    pub config_ui_state: ConfigUiState,
+    pub config_changed: bool,
+    pub slash_menu_selected: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +194,11 @@ impl App {
             pending_approval_tool: None,
             pending_approval_args: None,
             pending_approval_tx: None,
+            rlm_enabled: true,
+            rlm_iterating: false,
+            config_ui_state: ConfigUiState::default(),
+            config_changed: false,
+            slash_menu_selected: 0,
         }
     }
 
@@ -183,10 +228,11 @@ impl App {
              ┃  provider : {:<23}┃\n\
              ┃  model    : {:<23}┃\n\
              ┃  cwd      : {:<23}┃\n\
+             ┃  rlm      : {:<23}┃\n\
              ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\
              \n\
              Type a message or use /help for commands.",
-            ASCII_BANNER.trim(),
+            ASCII_BANNER.trim_matches('\n'),
             self.provider,
             self.model,
             if short_cwd.len() > 23 {
@@ -194,6 +240,7 @@ impl App {
             } else {
                 short_cwd
             },
+            if self.rlm_enabled { "on" } else { "off" }
         );
         self.push_chat("", &welcome, ChatStyle::Welcome);
     }
@@ -236,6 +283,7 @@ impl App {
                      /clear      — clear conversation\n\
                      /model      — show current model\n\
                      /model NAME — switch model\n\
+                     /rlm        — toggle RLM engine on/off\n\
                      /quit       — exit rot",
                     ChatStyle::System,
                 );
@@ -249,20 +297,19 @@ impl App {
                 self.push_chat("system", "Conversation cleared.", ChatStyle::System);
                 true
             }
-            "/model" => {
-                if parts.len() > 1 {
-                    self.push_chat(
-                        "system",
-                        &format!("Model → {} (takes effect next message)", parts[1]),
-                        ChatStyle::System,
-                    );
-                } else {
-                    self.push_chat(
-                        "system",
-                        &format!("{} / {}", self.provider, self.model),
-                        ChatStyle::System,
-                    );
-                }
+            "/models" | "/model" => {
+                self.state = AppState::Config;
+                self.config_ui_state = ConfigUiState::List(0);
+                true
+            }
+            "/rlm" => {
+                self.rlm_enabled = !self.rlm_enabled;
+                let state_str = if self.rlm_enabled { "ON" } else { "OFF" };
+                self.push_chat(
+                    "system",
+                    &format!("RLM Engine is now {}", state_str),
+                    ChatStyle::System,
+                );
                 true
             }
             "/quit" | "/exit" => {
@@ -285,17 +332,134 @@ impl App {
         let text = self.input.clone();
         self.input.clear();
         self.cursor_pos = 0;
+        self.slash_menu_selected = 0;
         text
     }
 
     pub fn insert_char(&mut self, c: char) {
         self.input.insert(self.cursor_pos, c);
         self.cursor_pos += c.len_utf8();
+        self.sync_slash_menu_selection();
     }
 
     pub fn insert_newline(&mut self) {
         self.input.insert(self.cursor_pos, '\n');
         self.cursor_pos += 1;
+        self.sync_slash_menu_selection();
+    }
+
+    pub fn handle_config_key(
+        &mut self,
+        key_code: crossterm::event::KeyCode,
+        config_store: &rot_core::config::ConfigStore,
+    ) {
+        match &mut self.config_ui_state {
+            ConfigUiState::List(idx) => match key_code {
+                crossterm::event::KeyCode::Up => *idx = idx.saturating_sub(1),
+                crossterm::event::KeyCode::Down => {
+                    *idx = (*idx + 1).min(AVAILABLE_MODELS.len().saturating_sub(1))
+                }
+                crossterm::event::KeyCode::Enter => {
+                    let (provider, model) = AVAILABLE_MODELS[*idx];
+                    let mut config = config_store.load();
+
+                    let has_key = config.api_keys.get(provider).map(|s| !s.is_empty()).unwrap_or(false)
+                        || std::env::var(&format!("{}_API_KEY", provider.to_uppercase())).is_ok();
+
+                    if has_key {
+                        config.provider = provider.to_string();
+                        config.model = model.to_string();
+                        let _ = config_store.save(&config);
+                        self.provider = provider.to_string();
+                        self.model = model.to_string();
+                        self.state = AppState::Idle;
+                        self.config_changed = true;
+                    } else {
+                        self.config_ui_state = ConfigUiState::InputKey {
+                            provider: provider.to_string(),
+                            model: model.to_string(),
+                            input: String::new(),
+                            cursor_pos: 0,
+                        };
+                    }
+                }
+                crossterm::event::KeyCode::Esc => self.state = AppState::Idle,
+                _ => {}
+            },
+            ConfigUiState::InputKey {
+                provider,
+                model,
+                input,
+                cursor_pos,
+            } => match key_code {
+                crossterm::event::KeyCode::Char(c) => {
+                    input.insert(*cursor_pos, c);
+                    *cursor_pos += c.len_utf8();
+                }
+                crossterm::event::KeyCode::Backspace => {
+                    if *cursor_pos > 0 {
+                        let prev = input[..*cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        input.remove(prev);
+                        *cursor_pos = prev;
+                    }
+                }
+                crossterm::event::KeyCode::Delete => {
+                    if *cursor_pos < input.len() {
+                        input.remove(*cursor_pos);
+                    }
+                }
+                crossterm::event::KeyCode::Left => {
+                    if *cursor_pos > 0 {
+                        *cursor_pos = input[..*cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                    }
+                }
+                crossterm::event::KeyCode::Right => {
+                    if *cursor_pos < input.len() {
+                        *cursor_pos += input[*cursor_pos..]
+                            .chars()
+                            .next()
+                            .map(|c| c.len_utf8())
+                            .unwrap_or(0);
+                    }
+                }
+                crossterm::event::KeyCode::Home => {
+                    *cursor_pos = 0;
+                }
+                crossterm::event::KeyCode::End => {
+                    *cursor_pos = input.len();
+                }
+                crossterm::event::KeyCode::Enter => {
+                    let api_key = input.trim();
+                    if !api_key.is_empty() {
+                        let mut config = config_store.load();
+                        config.api_keys.insert(provider.clone(), api_key.to_string());
+                        config.provider = provider.clone();
+                        config.model = model.clone();
+                        let _ = config_store.save(&config);
+                        config_store.hydrate_env();
+
+                        self.provider = provider.clone();
+                        self.model = model.clone();
+                        self.state = AppState::Idle;
+                        self.config_ui_state = ConfigUiState::List(0);
+                        self.config_changed = true;
+                    }
+                }
+                crossterm::event::KeyCode::Esc => {
+                    self.state = AppState::Idle;
+                    self.config_ui_state = ConfigUiState::List(0);
+                }
+                _ => {}
+            },
+        }
     }
 
     pub fn backspace(&mut self) {
@@ -307,6 +471,64 @@ impl App {
                 .unwrap_or(0);
             self.input.remove(prev);
             self.cursor_pos = prev;
+            self.sync_slash_menu_selection();
+        }
+    }
+
+    pub fn is_slash_menu_active(&self) -> bool {
+        self.state == AppState::Idle
+            && self.input_mode == InputMode::Insert
+            && self.input.starts_with('/')
+    }
+
+    pub fn filtered_slash_commands(&self) -> Vec<(&'static str, &'static str)> {
+        if !self.is_slash_menu_active() {
+            return Vec::new();
+        }
+
+        let query = self.input.trim();
+        SLASH_COMMANDS
+            .iter()
+            .copied()
+            .filter(|(name, _)| query == "/" || name.starts_with(query))
+            .collect()
+    }
+
+    pub fn sync_slash_menu_selection(&mut self) {
+        let count = self.filtered_slash_commands().len();
+        if count == 0 {
+            self.slash_menu_selected = 0;
+        } else {
+            self.slash_menu_selected = self.slash_menu_selected.min(count.saturating_sub(1));
+        }
+    }
+
+    pub fn move_slash_selection_up(&mut self) {
+        let count = self.filtered_slash_commands().len();
+        if count == 0 {
+            return;
+        }
+        if self.slash_menu_selected == 0 {
+            self.slash_menu_selected = count - 1;
+        } else {
+            self.slash_menu_selected -= 1;
+        }
+    }
+
+    pub fn move_slash_selection_down(&mut self) {
+        let count = self.filtered_slash_commands().len();
+        if count == 0 {
+            return;
+        }
+        self.slash_menu_selected = (self.slash_menu_selected + 1) % count;
+    }
+
+    pub fn selected_slash_command(&self) -> Option<&'static str> {
+        let commands = self.filtered_slash_commands();
+        if commands.is_empty() {
+            None
+        } else {
+            Some(commands[self.slash_menu_selected].0)
         }
     }
 
@@ -344,10 +566,13 @@ impl App {
         self.render_messages(frame, chunks[1]);
         self.render_input(frame, chunks[2]);
         self.render_footer(frame, chunks[3]);
+        self.render_slash_menu(frame, chunks[2]);
 
         // Overlay dialog
         if self.state == AppState::Approval {
             self.render_approval_dialog(frame, area);
+        } else if self.state == AppState::Config {
+            self.render_config_dialog(frame, area);
         }
     }
 
@@ -362,6 +587,7 @@ impl App {
             }
             AppState::Streaming => "◉",
             AppState::Approval => "⚠",
+            AppState::Config => "⚙",
             AppState::Error => "✖",
         };
 
@@ -370,17 +596,9 @@ impl App {
             AppState::Thinking => COLOR_THINKING,
             AppState::Streaming => COLOR_ACCENT,
             AppState::Approval => COLOR_ERROR,
+            AppState::Config => COLOR_DIM,
             AppState::Error => COLOR_ERROR,
         };
-
-        let left = Line::from(vec![
-            Span::styled(format!(" {spinner} "), Style::default().fg(state_color)),
-            Span::styled("rot", Style::default().fg(COLOR_ACCENT).bold()),
-            Span::styled(
-                format!("  {}", self.status),
-                Style::default().fg(COLOR_BAR_FG),
-            ),
-        ]);
 
         // Right: elapsed time
         let right_text = if let Some(elapsed) = self.last_elapsed {
@@ -391,19 +609,30 @@ impl App {
             String::new()
         };
 
-        let used = left.width() + right_text.len();
-        let pad = (area.width as usize).saturating_sub(used);
-
-        let header_line = Line::from(vec![
+        let mut header_spans = vec![
             Span::styled(format!(" {spinner} "), Style::default().fg(state_color)),
-            Span::styled("rot", Style::default().fg(COLOR_ACCENT).bold()),
-            Span::styled(
-                format!("  {}", self.status),
-                Style::default().fg(COLOR_BAR_FG),
-            ),
-            Span::raw(" ".repeat(pad)),
-            Span::styled(right_text, Style::default().fg(COLOR_DIM)),
-        ]);
+            Span::styled(format!(" {}", self.status), Style::default().fg(COLOR_BAR_FG)),
+        ];
+
+        let mut right_spans = vec![];
+        if self.rlm_iterating && self.state == AppState::Thinking {
+            let anim = match (self.thinking_tick / 3) % 4 {
+                0 => "⠋", 1 => "⠙", 2 => "⠸", _ => "⠴",
+            };
+            right_spans.push(Span::styled(format!("RLM {}  ", anim), Style::default().fg(COLOR_THINKING)));
+        }
+        if !right_text.is_empty() {
+            right_spans.push(Span::styled(right_text, Style::default().fg(COLOR_DIM)));
+        }
+
+        let left_width: usize = header_spans.iter().map(|s| s.width()).sum();
+        let right_width: usize = right_spans.iter().map(|s| s.width()).sum();
+        
+        let pad = (area.width as usize).saturating_sub(left_width + right_width);
+        header_spans.push(Span::raw(" ".repeat(pad)));
+        header_spans.extend(right_spans);
+
+        let header_line = Line::from(header_spans);
 
         let bar = Paragraph::new(header_line)
             .style(Style::default().bg(COLOR_HEADER_BG));
@@ -538,6 +767,7 @@ impl App {
             },
             AppState::Thinking | AppState::Streaming => COLOR_BORDER,
             AppState::Approval | AppState::Error => COLOR_ERROR,
+            AppState::Config => COLOR_BORDER,
         };
 
         let prompt = match self.input_mode {
@@ -557,6 +787,7 @@ impl App {
             AppState::Idle => Style::default().fg(COLOR_CODE_FG),
             AppState::Thinking | AppState::Streaming => Style::default().fg(COLOR_DIM),
             AppState::Approval | AppState::Error => Style::default().fg(COLOR_ERROR),
+            AppState::Config => Style::default().fg(COLOR_DIM),
         };
 
         let paragraph = Paragraph::new(input_text).style(style).block(block);
@@ -648,6 +879,86 @@ impl App {
         frame.render_widget(bar, area);
     }
 
+    fn render_slash_menu(&self, frame: &mut Frame, input_area: Rect) {
+        let commands = self.filtered_slash_commands();
+        if commands.is_empty() {
+            return;
+        }
+
+        let selected = self
+            .slash_menu_selected
+            .min(commands.len().saturating_sub(1));
+        let visible_count = commands.len().min(8);
+        let start = if commands.len() <= visible_count {
+            0
+        } else {
+            selected.saturating_sub(visible_count - 1).min(commands.len() - visible_count)
+        };
+        let end = start + visible_count;
+        let visible = &commands[start..end];
+
+        let max_content_width = visible
+            .iter()
+            .map(|(name, desc)| name.len() + 2 + desc.len())
+            .max()
+            .unwrap_or(20) as u16;
+        let available_width = input_area.width.saturating_sub(2);
+        if available_width == 0 {
+            return;
+        }
+        let preferred_width = (max_content_width + 4).max(26);
+        let width = preferred_width.min(available_width);
+        let height = visible_count as u16 + 2;
+
+        let menu_area = Rect {
+            x: input_area.x + 1,
+            y: input_area.y.saturating_sub(height),
+            width,
+            height,
+        };
+
+        frame.render_widget(Clear, menu_area);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_ACCENT))
+            .style(Style::default().bg(COLOR_CODE_BG));
+        let inner = block.inner(menu_area);
+        frame.render_widget(block, menu_area);
+
+        let max_name_len = visible
+            .iter()
+            .map(|(name, _)| name.len())
+            .max()
+            .unwrap_or(0);
+
+        let mut lines: Vec<Line> = Vec::with_capacity(visible.len());
+        for (idx, (name, desc)) in visible.iter().enumerate() {
+            let is_selected = (start + idx) == selected;
+            let style = if is_selected {
+                Style::default().fg(Color::Black).bg(COLOR_ACCENT)
+            } else {
+                Style::default().fg(COLOR_CODE_FG).bg(COLOR_CODE_BG)
+            };
+            let desc_style = if is_selected {
+                Style::default().fg(Color::Black).bg(COLOR_ACCENT)
+            } else {
+                Style::default().fg(COLOR_DIM).bg(COLOR_CODE_BG)
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{name:<width$}", width = max_name_len + 1),
+                    style,
+                ),
+                Span::styled(desc.to_string(), desc_style),
+            ]));
+        }
+
+        let list = Paragraph::new(lines).style(Style::default().bg(COLOR_CODE_BG));
+        frame.render_widget(list, inner);
+    }
+
     fn render_approval_dialog(&self, frame: &mut Frame, area: Rect) {
         use ratatui::layout::{Constraint, Direction, Layout};
         use ratatui::widgets::Clear;
@@ -700,22 +1011,134 @@ impl App {
         }
 
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Allow this action? ", Style::default().fg(COLOR_CODE_FG)),
-            Span::styled("[y]", Style::default().fg(COLOR_ASSISTANT).bold()),
-            Span::styled(" Yes  ", Style::default().fg(COLOR_CODE_FG)),
-            Span::styled("[a]", Style::default().fg(COLOR_ASSISTANT).bold()),
-            Span::styled(" Always  ", Style::default().fg(COLOR_CODE_FG)),
-            Span::styled("[n]", Style::default().fg(COLOR_ERROR).bold()),
-            Span::styled(" No  ", Style::default().fg(COLOR_CODE_FG)),
-            Span::styled("[d]", Style::default().fg(COLOR_ERROR).bold()),
-            Span::styled(" Deny Always", Style::default().fg(COLOR_CODE_FG)),
-        ]));
-
         let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
         frame.render_widget(paragraph, dialog_area);
+
+        let yes_btn = Span::styled(" [y]es ", Style::default().fg(COLOR_ASSISTANT).bold());
+        let always_btn = Span::styled(" [a]lways ", Style::default().fg(COLOR_SYSTEM).bold());
+        let no_btn = Span::styled(" [n]o ", Style::default().fg(COLOR_ERROR).bold());
+        let deny_btn = Span::styled(" [d]eny ", Style::default().fg(COLOR_DIM).bold());
+
+        let footer = Line::from(vec![
+            Span::raw(" Allow execution? "),
+            yes_btn, always_btn, no_btn, deny_btn,
+        ]);
+        let footer_p = Paragraph::new(footer).alignment(Alignment::Center);
+        frame.render_widget(footer_p, dialog_area); // Using dialog_area here instead of chunks[1] 
     }
 
+    fn render_config_dialog(&self, frame: &mut Frame, area: Rect) {
+        use ratatui::layout::{Constraint, Direction, Layout};
+        use ratatui::widgets::Clear;
+        use ratatui::widgets::{Block, Borders, Paragraph};
+        use ratatui::layout::Alignment;
+        let (desired_width, desired_height) = match self.config_ui_state {
+            ConfigUiState::List(_) => (50, 15),
+            ConfigUiState::InputKey { .. } => (area.width.saturating_sub(6).clamp(40, 96), 12),
+        };
+
+        let popup_area = ratatui::layout::Rect {
+            x: area.x + (area.width.saturating_sub(desired_width.min(area.width))) / 2,
+            y: area.y + (area.height.saturating_sub(desired_height.min(area.height))) / 2,
+            width: desired_width.min(area.width),
+            height: desired_height.min(area.height),
+        };
+
+        frame.render_widget(Clear, popup_area);
+
+        let block = match self.config_ui_state {
+            ConfigUiState::List(_) => Block::default()
+                .title(" Select Model & Config (/models) ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_BANNER)),
+            ConfigUiState::InputKey { .. } => Block::default()
+                .title(" API key ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_BANNER)),
+        };
+        
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        match &self.config_ui_state {
+            ConfigUiState::List(selected_idx) => {
+                let items: Vec<ratatui::widgets::ListItem> = AVAILABLE_MODELS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (p, m))| {
+                        let mut style = Style::default().fg(COLOR_CODE_FG);
+                        let prefix = if i == *selected_idx {
+                            style = style.fg(COLOR_ACCENT).bold();
+                            " ▶ "
+                        } else {
+                            "   "
+                        };
+                        ratatui::widgets::ListItem::new(format!("{prefix}{} / {}", p, m)).style(style)
+                    })
+                    .collect();
+
+                let list = ratatui::widgets::List::new(items);
+                frame.render_widget(list, inner);
+            }
+            ConfigUiState::InputKey { provider, input, cursor_pos, .. } => {
+                let esc_hint = Paragraph::new("esc")
+                    .style(Style::default().fg(COLOR_DIM))
+                    .alignment(Alignment::Right);
+                let esc_hint_area = Rect {
+                    x: popup_area.x + 1,
+                    y: popup_area.y,
+                    width: popup_area.width.saturating_sub(2),
+                    height: 1,
+                };
+                frame.render_widget(esc_hint, esc_hint_area);
+
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([
+                        Constraint::Length(1), // provider
+                        Constraint::Length(1), // input
+                        Constraint::Min(1),    // padding
+                        Constraint::Length(1), // footer
+                    ])
+                    .split(inner);
+
+                let provider_label = Paragraph::new(format!("{provider} provider"))
+                    .style(Style::default().fg(COLOR_DIM))
+                    .alignment(Alignment::Left);
+                frame.render_widget(provider_label, chunks[0]);
+
+                let (input_text, input_style) = if input.is_empty() {
+                    (
+                        "API key".to_string(),
+                        Style::default().fg(COLOR_DIM),
+                    )
+                } else {
+                    (
+                        input.clone(),
+                        Style::default().fg(COLOR_CODE_FG),
+                    )
+                };
+                let input_widget = Paragraph::new(input_text).style(input_style);
+                
+                frame.render_widget(input_widget, chunks[1]);
+
+                let footer = Paragraph::new(Line::from(vec![
+                    Span::styled("enter", Style::default().fg(COLOR_CODE_FG).bold()),
+                    Span::raw(" "),
+                    Span::styled("submit", Style::default().fg(COLOR_DIM)),
+                ]))
+                .alignment(Alignment::Left);
+                frame.render_widget(footer, chunks[3]);
+
+                let cursor_col = (*cursor_pos).min(chunks[1].width.saturating_sub(1) as usize) as u16;
+                frame.set_cursor_position(ratatui::layout::Position::new(
+                    chunks[1].x + cursor_col,
+                    chunks[1].y,
+                ));
+            }
+        }
+    }
 
     // ── Markdown Parser ────────────────────────────────────────────────
 
@@ -927,5 +1350,31 @@ mod tests {
         assert_eq!(get_context_window("claude-sonnet-4-20250514"), 200_000);
         assert_eq!(get_context_window("glm-5"), 128_000);
         assert_eq!(get_context_window("unknown"), 128_000);
+    }
+
+    #[test]
+    fn test_slash_menu_active_and_filtered() {
+        let mut app = App::new("test", "test");
+        app.input = "/m".to_string();
+        app.cursor_pos = app.input.len();
+        let items = app.filtered_slash_commands();
+        assert!(app.is_slash_menu_active());
+        assert!(items.iter().any(|(cmd, _)| *cmd == "/models"));
+        assert!(items.iter().any(|(cmd, _)| *cmd == "/model"));
+    }
+
+    #[test]
+    fn test_slash_selection_wraps() {
+        let mut app = App::new("test", "test");
+        app.input = "/".to_string();
+        app.cursor_pos = 1;
+        app.sync_slash_menu_selection();
+        app.move_slash_selection_up();
+        assert_eq!(
+            app.slash_menu_selected,
+            app.filtered_slash_commands().len() - 1
+        );
+        app.move_slash_selection_down();
+        assert_eq!(app.slash_menu_selected, 0);
     }
 }

@@ -1,7 +1,8 @@
 //! Write file tool — creates or overwrites files.
 
 use crate::error::ToolError;
-use crate::traits::{Tool, ToolContext, ToolResult};
+use crate::path_guard::resolve_path_for_write;
+use crate::traits::{SandboxMode, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -38,10 +39,18 @@ impl Tool for WriteTool {
         args: serde_json::Value,
         ctx: &ToolContext,
     ) -> Result<ToolResult, ToolError> {
+        if ctx.sandbox_mode == SandboxMode::ReadOnly {
+            return Err(ToolError::PermissionDenied(
+                "write is disabled in read-only sandbox mode".to_string(),
+            ));
+        }
+
         let params: WriteParams = serde_json::from_value(args)
             .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
 
-        let path = if Path::new(&params.path).is_absolute() {
+        let path = if ctx.sandbox_mode == SandboxMode::WorkspaceWrite {
+            resolve_path_for_write(Path::new(&params.path), &ctx.working_dir)?
+        } else if Path::new(&params.path).is_absolute() {
             std::path::PathBuf::from(&params.path)
         } else {
             ctx.working_dir.join(&params.path)
@@ -126,5 +135,43 @@ mod tests {
 
         let content = std::fs::read_to_string(dir.path().join("f.txt")).unwrap();
         assert_eq!(content, "new");
+    }
+
+    #[tokio::test]
+    async fn test_write_denied_in_read_only_mode() {
+        let dir = TempDir::new().unwrap();
+        let ctx = ToolContext {
+            working_dir: dir.path().to_path_buf(),
+            sandbox_mode: SandboxMode::ReadOnly,
+            ..Default::default()
+        };
+
+        let result = WriteTool
+            .execute(
+                serde_json::json!({"path":"x.txt","content":"x"}),
+                &ctx,
+            )
+            .await;
+        assert!(matches!(result, Err(ToolError::PermissionDenied(_))));
+    }
+
+    #[tokio::test]
+    async fn test_write_workspace_write_blocks_outside_workspace() {
+        let dir = TempDir::new().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_path = outside.path().join("blocked.txt");
+        let ctx = ToolContext {
+            working_dir: dir.path().to_path_buf(),
+            sandbox_mode: SandboxMode::WorkspaceWrite,
+            ..Default::default()
+        };
+
+        let result = WriteTool
+            .execute(
+                serde_json::json!({"path": outside_path.display().to_string(), "content":"x"}),
+                &ctx,
+            )
+            .await;
+        assert!(matches!(result, Err(ToolError::PermissionDenied(_))));
     }
 }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 /// Registry of available tools.
 ///
 /// Stores tools by name and provides lookup functionality.
+#[derive(Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
 }

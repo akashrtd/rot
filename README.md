@@ -120,6 +120,41 @@ rot exec "find all TODO comments and create a summary"
 rot exec "write a test for the auth module"
 ```
 
+### Security and Approval Modes
+
+```bash
+# Balanced default (from config or built-in defaults)
+rot --sandbox workspace-write --ask-for-approval on-request
+
+# Automation-friendly shortcut
+rot --full-auto
+
+# Fully unrestricted (dangerous)
+rot --dangerously-bypass-approvals-and-sandbox
+# alias:
+rot --yolo
+```
+
+Defaults:
+- `sandbox_mode=workspace-write`
+- `approval_policy=on-request`
+- `sandbox_network_access=false`
+
+`rot exec` is non-interactive, so approval is forced to `never`.
+
+### Exec Automation Output
+
+```bash
+# JSONL events
+rot exec "summarize this repo" --json
+
+# Single final JSON object
+rot exec "summarize this repo" --final-json
+
+# Validate final JSON response against a schema
+rot exec "return valid JSON" --final-json --output-schema ./schema.json
+```
+
 ### Session Management
 
 ```bash

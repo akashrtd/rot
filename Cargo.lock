@@ -1600,6 +1600,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "rot-core",
+ "rot-provider",
+ "rot-rlm",
+ "rot-session",
+ "rot-tools",
+ "rot-tui",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1654,15 +1662,12 @@ dependencies = [
 name = "rot-rlm"
 version = "0.1.0"
 dependencies = [
- "async-trait",
- "futures",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "ulid",
 ]
 
 [[package]]
@@ -1703,7 +1708,14 @@ name = "rot-tui"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "futures",
  "ratatui",
+ "rot-core",
+ "rot-provider",
+ "rot-session",
+ "rot-tools",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

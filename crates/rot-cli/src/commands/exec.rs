@@ -1,7 +1,7 @@
 //! Single-shot exec command.
 
 use rot_core::{Agent, AgentConfig, ContentBlock, Message};
-use rot_provider::{AnthropicProvider, Provider};
+use rot_provider::{AnthropicProvider, Provider, new_zai_provider};
 use rot_tools::ToolRegistry;
 
 /// Execute a single prompt and print the result.
@@ -53,8 +53,24 @@ fn create_provider(
             }
             Ok(Box::new(provider))
         }
+        "zai" => {
+            let api_key = std::env::var("ZAI_API_KEY").map_err(|_| {
+                anyhow::anyhow!(
+                    "ZAI_API_KEY not set. Set it with:\n  \
+                     export ZAI_API_KEY=your-key-here\n\n\
+                     Get your key from https://z.ai"
+                )
+            })?;
+            let mut provider = new_zai_provider(api_key);
+            if model != "glm-5" {
+                provider
+                    .set_model(model)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+            }
+            Ok(Box::new(provider))
+        }
         other => Err(anyhow::anyhow!(
-            "Unknown provider: {other}. Available: anthropic"
+            "Unknown provider: {other}. Available: anthropic, zai"
         )),
     }
 }

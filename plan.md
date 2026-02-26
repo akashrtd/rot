@@ -1601,12 +1601,12 @@ All ─────────────────────────�
 | 0. Setup      | T0.1–T0.3 | ✅ Complete                   |
 | 1. Core Types | T1.1–T1.4 | ✅ Complete                   |
 | 2. Providers  | T2.1–T2.5 | 🟡 T2.1 done (T2.2–T2.5 v1.0) |
-| 3. Tools      | T3.1–T3.7 | ⬜ Not Started                |
-| 4. Session    | T4.1      | ⬜ Not Started                |
-| 5. Agent      | T5.1–T5.2 | ⬜ Not Started                |
-| 6. RLM        | T6.1–T6.3 | ⬜ Not Started                |
-| 7. TUI        | T7.1–T7.5 | ⬜ Not Started                |
-| 8. CLI        | T8.1–T8.3 | ⬜ Not Started                |
+| 3. Tools      | T3.1–T3.7 | ✅ Complete                   |
+| 4. Session    | T4.1      | ✅ Complete                   |
+| 5. Agent      | T5.1–T5.2 | 🟡 T5.1 done (T5.2 v1.0)      |
+| 6. RLM        | T6.1–T6.3 | 🟡 T6.1 done (T6.2–T6.3 v1.0) |
+| 7. TUI        | T7.1–T7.5 | ✅ Complete                   |
+| 8. CLI        | T8.1–T8.3 | ✅ Complete                   |
 | 9. Polish     | T9.1–T9.3 | ⬜ Not Started                |
 
 ---

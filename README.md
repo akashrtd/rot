@@ -13,10 +13,9 @@
 
 ---
 
-rot is a **terminal-native AI coding agent** built in Rust. Give it a task, and it reads your code, runs commands, edits files, and builds solutions — all from a single chat interface.
-
+ROT is a **terminal-native AI coding agent** built in Rust. 
 ```text
-███████████      ███████    ███████████
+ ███████████      ███████    ███████████
 ░░███░░░░░███   ███░░░░░███ ░█░░░███░░░█
  ░███    ░███  ███     ░░███░   ░███  ░
  ░██████████  ░███      ░███    ░███
@@ -24,30 +23,6 @@ rot is a **terminal-native AI coding agent** built in Rust. Give it a task, and 
  ░███    ░███ ░░███     ███     ░███
  █████   █████ ░░░███████░      █████
 ░░░░░   ░░░░░    ░░░░░░░       ░░░░░
-```
-
-```
-┌ rot ────────────────────────────────────────────────────┐
-│you: refactor the authentication module to use JWT       │
-│                                                         │
-│rot: I'll analyze the current auth module and refactor   │
-│     it to use JWT tokens. Let me start by reading the   │
-│     existing code...                                    │
-│                                                         │
-│tool: ↳ read                                             │
-│tool: ↳ edit                                             │
-│tool: ↳ bash                                             │
-│                                                         │
-│rot: Done! I've refactored auth.rs to use JWT. Changes:  │
-│     • Added jsonwebtoken dependency                     │
-│     • Replaced session tokens with JWT claims           │
-│     • Updated middleware to verify JWT signatures       │
-│     • All 12 tests pass                                 │
-└─────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────┐
-│›                                                        │
-└─────────────────────────────────────────────────────────┘
- ● Ready | anthropic / claude-sonnet-4-20250514 | Ctrl+C: quit
 ```
 
 ## Why rot?

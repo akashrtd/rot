@@ -407,68 +407,44 @@ impl App {
                     lines.push(Line::from(""));
                 }
                 _ => {
-                    let (role_style, content_style) = match msg.style {
-                        ChatStyle::User => (
-                            Style::default().fg(COLOR_USER).bold(),
-                            Style::default(),
-                        ),
-                        ChatStyle::Assistant => (
-                            Style::default().fg(COLOR_ASSISTANT).bold(),
-                            Style::default(),
-                        ),
-                        ChatStyle::System => (
-                            Style::default().fg(COLOR_SYSTEM).bold(),
-                            Style::default().fg(COLOR_SYSTEM),
-                        ),
-                        ChatStyle::Tool => (
-                            Style::default().fg(COLOR_TOOL),
-                            Style::default().fg(COLOR_TOOL),
-                        ),
-                        ChatStyle::Error => (
-                            Style::default().fg(COLOR_ERROR).bold(),
-                            Style::default().fg(COLOR_ERROR),
-                        ),
+                    let (role_color, content_style) = match msg.style {
+                        ChatStyle::User => (COLOR_USER, Style::default()),
+                        ChatStyle::Assistant => (COLOR_ASSISTANT, Style::default()),
+                        ChatStyle::System => (COLOR_SYSTEM, Style::default().fg(COLOR_SYSTEM)),
+                        ChatStyle::Tool => (COLOR_TOOL, Style::default().fg(COLOR_TOOL)),
+                        ChatStyle::Error => (COLOR_ERROR, Style::default().fg(COLOR_ERROR)),
                         ChatStyle::Thinking => (
-                            Style::default().fg(COLOR_THINKING).italic(),
+                            COLOR_THINKING,
                             Style::default().fg(COLOR_THINKING).italic(),
                         ),
                         ChatStyle::Welcome => unreachable!(),
                     };
 
-                    let role_prefix = if msg.role.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{}  ", msg.role)
-                    };
-                    let indent_len = if msg.role.is_empty() {
-                        0
-                    } else {
-                        msg.role.len() + 2
-                    };
+                    // Highlight background for message box
+                    let msg_bg = Color::Rgb(29, 32, 47);
+                    let line_style = Style::default().bg(msg_bg);
+
+                    // Left vertical bar to identify speaker
+                    // Note: No more string roles like "you" or "rot".
+                    let bar_span = Span::styled("▌ ", Style::default().fg(role_color).bg(msg_bg));
 
                     let content_lines: Vec<&str> = msg.content.lines().collect();
                     if content_lines.is_empty() {
-                        lines.push(Line::from(vec![
-                            Span::raw(" "),
-                            Span::styled(role_prefix, role_style),
-                        ]));
+                        lines.push(
+                            Line::from(vec![
+                                Span::styled(" ", Style::default().bg(msg_bg)),
+                                bar_span,
+                            ])
+                            .style(line_style),
+                        );
                     } else {
-                        for (i, content_line) in content_lines.iter().enumerate() {
-                            if i == 0 {
-                                let mut spans = vec![
-                                    Span::raw(" "),
-                                    Span::styled(role_prefix.clone(), role_style),
-                                ];
-                                spans.extend(Self::parse_markdown(content_line, content_style));
-                                lines.push(Line::from(spans));
-                            } else {
-                                let mut spans = vec![
-                                    Span::raw(" "),
-                                    Span::raw(" ".repeat(indent_len)),
-                                ];
-                                spans.extend(Self::parse_markdown(content_line, content_style));
-                                lines.push(Line::from(spans));
-                            }
+                        for content_line in content_lines {
+                            let mut spans = vec![
+                                Span::styled(" ", Style::default().bg(msg_bg)),
+                                bar_span.clone(),
+                            ];
+                            spans.extend(Self::parse_markdown(content_line, content_style));
+                            lines.push(Line::from(spans).style(line_style));
                         }
                     }
                     lines.push(Line::from(""));
@@ -478,20 +454,18 @@ impl App {
 
         // Streaming text
         if !self.streaming_text.is_empty() {
+            let msg_bg = Color::Rgb(29, 32, 47);
+            let line_style = Style::default().bg(msg_bg);
+            let bar_span = Span::styled("▌ ", Style::default().fg(COLOR_ASSISTANT).bg(msg_bg));
+
             let stream_lines: Vec<&str> = self.streaming_text.lines().collect();
-            for (i, line) in stream_lines.iter().enumerate() {
-                if i == 0 {
-                    let mut spans = vec![
-                        Span::raw(" "),
-                        Span::styled("rot  ", Style::default().fg(COLOR_ASSISTANT).bold()),
-                    ];
-                    spans.extend(Self::parse_markdown(line, Style::default()));
-                    lines.push(Line::from(spans));
-                } else {
-                    let mut spans = vec![Span::raw("      ")];
-                    spans.extend(Self::parse_markdown(line, Style::default()));
-                    lines.push(Line::from(spans));
-                }
+            for line in stream_lines {
+                let mut spans = vec![
+                    Span::styled(" ", Style::default().bg(msg_bg)),
+                    bar_span.clone(),
+                ];
+                spans.extend(Self::parse_markdown(line, Style::default()));
+                lines.push(Line::from(spans).style(line_style));
             }
         }
 

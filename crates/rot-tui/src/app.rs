@@ -96,6 +96,7 @@ pub const AVAILABLE_MODELS: &[(&str, &str)] = &[
 pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/agents", "Switch agent"),
     ("/children", "Inspect delegated child runs"),
+    ("/tree", "Show session tree"),
     ("/help", "Show help"),
     ("/clear", "Clear conversation"),
     ("/models", "Switch model"),
@@ -293,6 +294,7 @@ impl App {
                     "/agents     — switch active agent\n\
                      /children   — list delegated child runs\n\
                      /child ID   — inspect one child session\n\
+                     /tree       — show current session tree\n\
                      /help       — show this message\n\
                      /clear      — clear conversation\n\
                      /model      — show current model\n\
@@ -316,6 +318,8 @@ impl App {
                 self.sync_agent_menu_selection();
                 true
             }
+            "/children" | "/tree" => false,
+            _ if cmd.starts_with("/child ") => false,
             "/models" | "/model" => {
                 self.state = AppState::Config;
                 self.config_ui_state = ConfigUiState::List(0);
@@ -1517,6 +1521,12 @@ mod tests {
         let mut app = App::new("test", "test", "default");
         assert!(app.handle_slash_command("/agents"));
         assert_eq!(app.state, AppState::Agents);
+    }
+
+    #[test]
+    fn test_slash_tree_is_reserved_for_runner_inspection() {
+        let mut app = App::new("test", "test", "default");
+        assert!(!app.handle_slash_command("/tree"));
     }
 
     #[test]

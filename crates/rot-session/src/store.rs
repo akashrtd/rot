@@ -1,7 +1,8 @@
 //! JSONL session store implementation.
 
 use crate::error::SessionError;
-use crate::format::{entry_timestamp, SessionEntry, SessionMeta};
+use crate::format::{entry_timestamp, SessionEntry, SessionMeta, SessionTree, SessionTreeNode};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -209,6 +210,13 @@ impl SessionStore {
         cwd: &Path,
         limit: usize,
     ) -> Result<Vec<SessionMeta>, SessionError> {
+        let mut sessions = self.list_all(cwd).await?;
+        sessions.truncate(limit);
+        Ok(sessions)
+    }
+
+    /// List all sessions for a working directory, most recent first.
+    pub async fn list_all(&self, cwd: &Path) -> Result<Vec<SessionMeta>, SessionError> {
         let dir = self.sessions_dir.join(Self::cwd_hash(cwd));
         if !dir.exists() {
             return Ok(Vec::new());
@@ -228,8 +236,63 @@ impl SessionStore {
 
         // Sort by most recent first
         sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        sessions.truncate(limit);
         Ok(sessions)
+    }
+
+    /// Build the parent/child session tree for a session or the latest session in the cwd.
+    pub async fn tree(
+        &self,
+        cwd: &Path,
+        session_id: Option<&str>,
+    ) -> Result<SessionTree, SessionError> {
+        let sessions = self.list_all(cwd).await?;
+        if sessions.is_empty() {
+            return Err(SessionError::NotFound(
+                session_id.unwrap_or("latest").to_string(),
+            ));
+        }
+
+        let focus_id = session_id
+            .map(str::to_string)
+            .unwrap_or_else(|| sessions[0].id.clone());
+
+        let metas_by_id = sessions
+            .into_iter()
+            .map(|meta| (meta.id.clone(), meta))
+            .collect::<HashMap<_, _>>();
+
+        let Some(focus_meta) = metas_by_id.get(&focus_id) else {
+            return Err(SessionError::NotFound(focus_id));
+        };
+
+        let mut root_id = focus_meta.id.clone();
+        while let Some(parent_id) = metas_by_id
+            .get(&root_id)
+            .and_then(|meta| meta.parent_session_id.clone())
+        {
+            root_id = parent_id;
+        }
+
+        let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
+        for meta in metas_by_id.values() {
+            if let Some(parent_id) = &meta.parent_session_id {
+                children_by_parent
+                    .entry(parent_id.clone())
+                    .or_default()
+                    .push(meta.id.clone());
+            }
+        }
+
+        for child_ids in children_by_parent.values_mut() {
+            child_ids.sort_by(|left, right| {
+                let left_meta = metas_by_id.get(left).expect("child session missing");
+                let right_meta = metas_by_id.get(right).expect("child session missing");
+                left_meta.created_at.cmp(&right_meta.created_at)
+            });
+        }
+
+        let root = build_tree_node(&root_id, &metas_by_id, &children_by_parent)?;
+        Ok(SessionTree { root, focus_id })
     }
 
     /// Read metadata from a session file (parses first and last lines).
@@ -260,6 +323,8 @@ impl SessionStore {
                 cwd,
                 model,
                 provider,
+                parent_session_id,
+                agent,
                 ..
             } => Ok(SessionMeta {
                 id,
@@ -269,6 +334,8 @@ impl SessionStore {
                 cwd,
                 model,
                 provider,
+                parent_session_id,
+                agent,
                 message_count,
             }),
             _ => Err(SessionError::InvalidFormat(
@@ -282,6 +349,31 @@ impl Default for SessionStore {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn build_tree_node(
+    id: &str,
+    metas_by_id: &HashMap<String, SessionMeta>,
+    children_by_parent: &HashMap<String, Vec<String>>,
+) -> Result<SessionTreeNode, SessionError> {
+    let Some(meta) = metas_by_id.get(id) else {
+        return Err(SessionError::InvalidFormat(format!(
+            "Unknown session referenced in tree: {}",
+            id
+        )));
+    };
+
+    let mut children = Vec::new();
+    if let Some(child_ids) = children_by_parent.get(id) {
+        for child_id in child_ids {
+            children.push(build_tree_node(child_id, metas_by_id, children_by_parent)?);
+        }
+    }
+
+    Ok(SessionTreeNode {
+        meta: meta.clone(),
+        children,
+    })
 }
 
 #[cfg(test)]
@@ -412,6 +504,31 @@ mod tests {
 
         let sessions = store.list_recent(&cwd, 10).await.unwrap();
         assert_eq!(sessions.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_build_session_tree_from_child_focus() {
+        let dir = TempDir::new().unwrap();
+        let store = SessionStore::with_dir(dir.path());
+        let cwd = dir.path().join("project");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let root = store.create(&cwd, "claude", "anthropic").await.unwrap();
+        let child = store
+            .create_child(&cwd, "claude", "anthropic", &root.id, None, Some("review"))
+            .await
+            .unwrap();
+        let grandchild = store
+            .create_child(&cwd, "claude", "anthropic", &child.id, None, Some("explore"))
+            .await
+            .unwrap();
+
+        let tree = store.tree(&cwd, Some(&grandchild.id)).await.unwrap();
+        assert_eq!(tree.focus_id, grandchild.id);
+        assert_eq!(tree.root.meta.id, root.id);
+        assert_eq!(tree.root.children.len(), 1);
+        assert_eq!(tree.root.children[0].meta.id, child.id);
+        assert_eq!(tree.root.children[0].children[0].meta.id, grandchild.id);
     }
 
     #[tokio::test]

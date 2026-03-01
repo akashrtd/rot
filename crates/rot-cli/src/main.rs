@@ -89,6 +89,15 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+            SessionAction::Tree { id } => {
+                let store = rot_session::SessionStore::new();
+                let cwd = std::env::current_dir()?;
+                let tree = store
+                    .tree(&cwd, id.as_deref())
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_session_tree(&tree.root, &tree.focus_id, "", true, true);
+            }
             SessionAction::Resume { id } => {
                 eprintln!("Session resume not yet implemented: {id}");
             }
@@ -96,4 +105,50 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn print_session_tree(
+    node: &rot_session::SessionTreeNode,
+    focus_id: &str,
+    prefix: &str,
+    is_last: bool,
+    is_root: bool,
+) {
+    let branch = if is_root {
+        ""
+    } else if is_last {
+        "└─ "
+    } else {
+        "├─ "
+    };
+    let marker = if node.meta.id == focus_id { ">" } else { " " };
+    let agent = node.meta.agent.as_deref().unwrap_or("root");
+    println!(
+        "{}{}{} {} @{} {} ({} msgs)",
+        prefix,
+        branch,
+        marker,
+        node.meta.id,
+        agent,
+        node.meta.model,
+        node.meta.message_count
+    );
+
+    let child_prefix = if is_root {
+        String::new()
+    } else if is_last {
+        format!("{}   ", prefix)
+    } else {
+        format!("{}│  ", prefix)
+    };
+
+    for (idx, child) in node.children.iter().enumerate() {
+        print_session_tree(
+            child,
+            focus_id,
+            &child_prefix,
+            idx == node.children.len() - 1,
+            false,
+        );
+    }
 }

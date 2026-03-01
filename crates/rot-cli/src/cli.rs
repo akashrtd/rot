@@ -178,7 +178,7 @@ impl Cli {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApprovalPolicyArg, Cli, Commands};
+    use super::{ApprovalPolicyArg, Cli, Commands, SessionAction};
     use clap::Parser;
     use rot_core::{ApprovalPolicy, Config};
 
@@ -282,6 +282,17 @@ mod tests {
         let parsed = Cli::try_parse_from(["rot", "--agent", "plan", "exec", "hello"]).unwrap();
         assert_eq!(parsed.agent.as_deref(), Some("plan"));
     }
+
+    #[test]
+    fn test_session_tree_command_parses() {
+        let parsed = Cli::try_parse_from(["rot", "session", "tree", "abc123"]).unwrap();
+        match parsed.command {
+            Some(Commands::Session {
+                action: SessionAction::Tree { id },
+            }) => assert_eq!(id.as_deref(), Some("abc123")),
+            _ => panic!("expected session tree command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -291,6 +302,11 @@ pub enum SessionAction {
         /// Maximum number of sessions to show.
         #[arg(short, long, default_value = "10")]
         limit: usize,
+    },
+    /// Show the parent/child tree for a session or the latest session.
+    Tree {
+        /// Session ID to focus in the rendered tree. Defaults to the latest session.
+        id: Option<String>,
     },
     /// Resume a previous session.
     Resume {

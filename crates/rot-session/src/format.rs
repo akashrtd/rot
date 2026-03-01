@@ -105,8 +105,32 @@ pub struct SessionMeta {
     pub model: String,
     /// Provider used.
     pub provider: String,
+    /// Parent session ID if this is a delegated child session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    /// Agent associated with the session, if known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     /// Number of message entries.
     pub message_count: usize,
+}
+
+/// Tree node describing one session and its delegated children.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTreeNode {
+    /// Metadata for this session.
+    pub meta: SessionMeta,
+    /// Delegated children.
+    pub children: Vec<SessionTreeNode>,
+}
+
+/// A browsable session tree plus the currently focused session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTree {
+    /// Root of the tree.
+    pub root: SessionTreeNode,
+    /// Session ID the tree was requested for.
+    pub focus_id: String,
 }
 
 /// Helper to get the ID from any entry type.
@@ -311,5 +335,46 @@ mod tests {
         assert_eq!(parsed.len(), 2);
         assert_eq!(entry_id(&parsed[0]), "s1");
         assert_eq!(entry_id(&parsed[1]), "m1");
+    }
+
+    #[test]
+    fn test_session_tree_serialization() {
+        let tree = SessionTree {
+            root: SessionTreeNode {
+                meta: SessionMeta {
+                    id: "root".to_string(),
+                    created_at: 1,
+                    updated_at: 2,
+                    title: None,
+                    cwd: "/project".to_string(),
+                    model: "claude".to_string(),
+                    provider: "anthropic".to_string(),
+                    parent_session_id: None,
+                    agent: None,
+                    message_count: 3,
+                },
+                children: vec![SessionTreeNode {
+                    meta: SessionMeta {
+                        id: "child".to_string(),
+                        created_at: 3,
+                        updated_at: 4,
+                        title: None,
+                        cwd: "/project".to_string(),
+                        model: "claude".to_string(),
+                        provider: "anthropic".to_string(),
+                        parent_session_id: Some("root".to_string()),
+                        agent: Some("review".to_string()),
+                        message_count: 2,
+                    },
+                    children: Vec::new(),
+                }],
+            },
+            focus_id: "child".to_string(),
+        };
+
+        let json = serde_json::to_string(&tree).unwrap();
+        let parsed: SessionTree = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.root.children.len(), 1);
+        assert_eq!(parsed.focus_id, "child");
     }
 }

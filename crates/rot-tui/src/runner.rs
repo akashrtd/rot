@@ -533,6 +533,18 @@ async fn handle_session_inspection_command(
         return true;
     }
 
+    if trimmed == "/tree" {
+        match render_session_tree_summary(session_store, cwd, session_id).await {
+            Ok(summary) => app.push_chat("system", &summary, ChatStyle::System),
+            Err(error) => app.push_chat(
+                "error",
+                &format!("Failed to inspect session tree: {}", error),
+                ChatStyle::Error,
+            ),
+        }
+        return true;
+    }
+
     if let Some(child_id) = trimmed.strip_prefix("/child ").map(str::trim) {
         match render_child_session_detail(session_store, cwd, session_id, child_id).await {
             Ok(detail) => app.push_chat("system", &detail, ChatStyle::System),
@@ -643,6 +655,67 @@ fn child_session_preview(session: &Session) -> String {
             _ => None,
         })
         .unwrap_or_else(|| "No transcript captured yet.".to_string())
+}
+
+async fn render_session_tree_summary(
+    session_store: &rot_session::SessionStore,
+    cwd: &std::path::Path,
+    session_id: &str,
+) -> Result<String, String> {
+    let tree = session_store
+        .tree(cwd, Some(session_id))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut lines = vec!["Session tree:".to_string(), String::new()];
+    append_session_tree_lines(&tree.root, &tree.focus_id, "", true, true, &mut lines);
+    Ok(lines.join("\n"))
+}
+
+fn append_session_tree_lines(
+    node: &rot_session::SessionTreeNode,
+    focus_id: &str,
+    prefix: &str,
+    is_last: bool,
+    is_root: bool,
+    lines: &mut Vec<String>,
+) {
+    let branch = if is_root {
+        ""
+    } else if is_last {
+        "└─ "
+    } else {
+        "├─ "
+    };
+    let marker = if node.meta.id == focus_id { ">" } else { " " };
+    lines.push(format!(
+        "{}{}{} {} @{} {}",
+        prefix,
+        branch,
+        marker,
+        node.meta.id,
+        node.meta.agent.as_deref().unwrap_or("root"),
+        node.meta.model
+    ));
+
+    let next_prefix = if is_root {
+        String::new()
+    } else if is_last {
+        format!("{}   ", prefix)
+    } else {
+        format!("{}│  ", prefix)
+    };
+
+    for (idx, child) in node.children.iter().enumerate() {
+        append_session_tree_lines(
+            child,
+            focus_id,
+            &next_prefix,
+            idx == node.children.len() - 1,
+            false,
+            lines,
+        );
+    }
 }
 
 fn format_child_session_detail(session: &Session) -> String {
@@ -846,5 +919,43 @@ mod tests {
         let formatted = format_child_session_detail(&session);
         assert!(formatted.contains("Child session child-1"));
         assert!(formatted.contains("assistant done"));
+    }
+
+    #[test]
+    fn test_append_session_tree_lines_renders_children() {
+        let tree = rot_session::SessionTreeNode {
+            meta: rot_session::SessionMeta {
+                id: "root".to_string(),
+                created_at: 1,
+                updated_at: 1,
+                title: None,
+                cwd: ".".to_string(),
+                model: "claude".to_string(),
+                provider: "anthropic".to_string(),
+                parent_session_id: None,
+                agent: None,
+                message_count: 1,
+            },
+            children: vec![rot_session::SessionTreeNode {
+                meta: rot_session::SessionMeta {
+                    id: "child".to_string(),
+                    created_at: 2,
+                    updated_at: 2,
+                    title: None,
+                    cwd: ".".to_string(),
+                    model: "claude".to_string(),
+                    provider: "anthropic".to_string(),
+                    parent_session_id: Some("root".to_string()),
+                    agent: Some("review".to_string()),
+                    message_count: 1,
+                },
+                children: Vec::new(),
+            }],
+        };
+
+        let mut lines = Vec::new();
+        append_session_tree_lines(&tree, "child", "", true, true, &mut lines);
+        assert!(lines.iter().any(|line| line.contains("root @root")));
+        assert!(lines.iter().any(|line| line.contains("└─ > child @review")));
     }
 }

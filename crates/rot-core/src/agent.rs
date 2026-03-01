@@ -233,6 +233,9 @@ impl Agent {
                         text_content.push_str(&delta);
                     }
                     StreamEvent::ToolCallStart { id, name } => {
+                        if let Some(tc) = current_tool.take() {
+                            tool_calls.push(tc);
+                        }
                         current_tool = Some(PendingToolCall {
                             id,
                             name,
@@ -250,6 +253,11 @@ impl Agent {
                         }
                     }
                     StreamEvent::Done { reason } => {
+                        if reason == StopReason::ToolUse {
+                            if let Some(tc) = current_tool.take() {
+                                tool_calls.push(tc);
+                            }
+                        }
                         stop_reason = reason;
                         break;
                     }
@@ -870,6 +878,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tool_call_without_explicit_end_still_executes() {
+        let provider = Box::new(MissingToolEndProvider {
+            step: StdMutex::new(0),
+        });
+        let mut tools = ToolRegistry::new();
+        rot_tools::register_all(&mut tools);
+
+        let agent = Arc::new(Agent::new(
+            provider,
+            tools,
+            AgentConfig::default(),
+            RuntimeSecurityConfig {
+                approval_policy: crate::security::ApprovalPolicy::Never,
+                ..RuntimeSecurityConfig::default()
+            },
+        ));
+
+        let mut messages = Vec::new();
+        let response = agent
+            .process(&mut messages, "read Cargo.toml and report the edition")
+            .await
+            .unwrap();
+
+        assert_eq!(response.text(), "edition = 2021");
+        assert!(messages.iter().any(|message| {
+            message.content.iter().any(|block| matches!(
+                block,
+                ContentBlock::ToolCall { name, .. } if name == "read"
+            ))
+        }));
+    }
+
+    #[tokio::test]
     async fn test_task_controller_enforces_total_budget() {
         let controller = TaskController::new(TaskExecutionPolicy {
             max_total_tasks: 1,
@@ -922,6 +963,10 @@ mod tests {
     }
 
     struct TaskTimeoutProvider {
+        step: StdMutex<usize>,
+    }
+
+    struct MissingToolEndProvider {
         step: StdMutex<usize>,
     }
 
@@ -1098,6 +1143,67 @@ mod tests {
             };
 
             Ok(stream)
+        }
+
+        async fn complete(&self, _: Request) -> Result<rot_provider::Response, ProviderError> {
+            unimplemented!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for MissingToolEndProvider {
+        fn name(&self) -> &str {
+            "dummy"
+        }
+
+        fn models(&self) -> Vec<rot_provider::ModelInfo> {
+            vec![]
+        }
+
+        fn current_model(&self) -> &str {
+            "dummy"
+        }
+
+        fn set_model(&mut self, _: &str) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        async fn stream(
+            &self,
+            _: Request,
+        ) -> Result<BoxStream<'_, Result<StreamEvent, ProviderError>>, ProviderError> {
+            let step = {
+                let mut lock = self.step.lock().unwrap();
+                *lock += 1;
+                *lock
+            };
+
+            let events = match step {
+                1 => vec![
+                    Ok(StreamEvent::ToolCallStart {
+                        id: "read-1".to_string(),
+                        name: "read".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallDelta {
+                        id: "read-1".to_string(),
+                        delta: "{\"path\":\"Cargo.toml\"}".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::ToolUse,
+                    }),
+                ],
+                2 => vec![
+                    Ok(StreamEvent::TextDelta {
+                        delta: "edition = 2021".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::EndTurn,
+                    }),
+                ],
+                other => panic!("unexpected provider step {other}"),
+            };
+
+            Ok(stream::iter(events).boxed())
         }
 
         async fn complete(&self, _: Request) -> Result<rot_provider::Response, ProviderError> {

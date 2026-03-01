@@ -484,6 +484,22 @@ impl TaskRunner for AgentTaskRunner {
                 rot_tools::ToolError::ExecutionError(format!("Subagent execution failed: {e}"))
             })?;
 
+        if let Some(mut child_session) = child_session {
+            let entries = messages_to_session_entries(&messages).map_err(|e| {
+                rot_tools::ToolError::ExecutionError(format!(
+                    "Failed to serialize child session messages: {e}"
+                ))
+            })?;
+
+            for entry in entries {
+                session_store.append(&mut child_session, entry).await.map_err(|e| {
+                    rot_tools::ToolError::ExecutionError(format!(
+                        "Failed to persist child session transcript: {e}"
+                    ))
+                })?;
+            }
+        }
+
         Ok(TaskExecution {
             final_text: response.text(),
             child_session_id,
@@ -497,6 +513,53 @@ fn current_timestamp() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn messages_to_session_entries(messages: &[Message]) -> Result<Vec<SessionEntry>, serde_json::Error> {
+    let mut entries = Vec::new();
+
+    for message in messages {
+        entries.push(SessionEntry::Message {
+            id: message.id.to_string(),
+            parent_id: message.parent_id.as_ref().map(ToString::to_string),
+            timestamp: message.timestamp,
+            role: message.role.to_string(),
+            content: serde_json::to_value(&message.content)?,
+        });
+
+        for (idx, block) in message.content.iter().enumerate() {
+            match block {
+                ContentBlock::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => entries.push(SessionEntry::ToolCall {
+                    id: id.clone(),
+                    parent_id: message.id.to_string(),
+                    timestamp: message.timestamp,
+                    name: name.clone(),
+                    arguments: arguments.clone(),
+                }),
+                ContentBlock::ToolResult {
+                    tool_call_id,
+                    content,
+                    is_error,
+                    ..
+                } => entries.push(SessionEntry::ToolResult {
+                    id: format!("{}:tool_result:{idx}", message.id),
+                    call_id: tool_call_id.clone(),
+                    timestamp: message.timestamp,
+                    output: content.clone(),
+                    is_error: *is_error,
+                }),
+                ContentBlock::Text { .. }
+                | ContentBlock::Image { .. }
+                | ContentBlock::Thinking { .. } => {}
+            }
+        }
+    }
+
+    Ok(entries)
 }
 
 /// Pending tool call being accumulated from streaming events.
@@ -591,6 +654,26 @@ mod tests {
             .expect("expected task tool result");
         assert_eq!(tool_result.0, "subagent result");
         assert!(tool_result.1["child_session_id"].is_null());
+    }
+
+    #[test]
+    fn test_messages_to_session_entries_emits_tool_entries() {
+        let message = Message::assistant(vec![
+            ContentBlock::Text {
+                text: "hello".to_string(),
+            },
+            ContentBlock::ToolCall {
+                id: "call-1".to_string(),
+                name: "read".to_string(),
+                arguments: serde_json::json!({"path":"src/main.rs"}),
+            },
+        ]);
+        let tool_result = Message::tool_result("call-1", "ok", false);
+
+        let entries = messages_to_session_entries(&[message, tool_result]).unwrap();
+        assert!(entries.iter().any(|entry| matches!(entry, SessionEntry::Message { .. })));
+        assert!(entries.iter().any(|entry| matches!(entry, SessionEntry::ToolCall { name, .. } if name == "read")));
+        assert!(entries.iter().any(|entry| matches!(entry, SessionEntry::ToolResult { call_id, .. } if call_id == "call-1")));
     }
 
     // Minimal dummy provider for testing conversion logic

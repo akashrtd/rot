@@ -4,7 +4,7 @@
 //! responsive, showing thinking animation and streaming text while
 //! the LLM generates its response.
 
-use crate::app::{App, AppState, ChatStyle, InputMode, ConfigUiState};
+use crate::app::{App, AppState, ChatStyle, ConfigUiState, InputMode};
 use crate::event::{is_quit, poll_event, TermEvent};
 use crossterm::event::{EnableMouseCapture, DisableMouseCapture, KeyCode, KeyModifiers};
 use crossterm::terminal::{
@@ -13,7 +13,8 @@ use crossterm::terminal::{
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use rot_core::permission::ApprovalResponse;
-use rot_core::{Agent, AgentConfig, ContentBlock, Message};
+use rot_core::{Agent, AgentConfig, AgentRegistry, ContentBlock, Message};
+use rot_session::{Session, SessionEntry};
 use tokio::sync::{mpsc, oneshot};
 
 use std::io::stdout;
@@ -58,7 +59,7 @@ pub async fn run_tui(
     stdout().execute(EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    let mut app = App::new(model, provider_name);
+    let mut app = App::new(model, provider_name, agent_name);
 
     // Show welcome banner
     app.show_welcome();
@@ -71,11 +72,7 @@ pub async fn run_tui(
         .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     // Build agent (shared for background tasks)
-    let config = AgentConfig {
-        agent_name: agent_name.to_string(),
-        system_prompt: Some(system_prompt),
-        ..Default::default()
-    };
+    let config = agent_config(agent_name, Some(system_prompt));
 
     // Channel for agent results
     let (tx, mut rx) = mpsc::unbounded_channel::<AgentEvent>();
@@ -87,30 +84,13 @@ pub async fn run_tui(
     let approval_tx_clone = approval_tx.clone();
     let runtime_security_for_agent = runtime_security.clone();
 
-    let mut agent = Arc::new(
-        Agent::new(
-            provider,
-            tools.clone(),
-            config.clone(),
-            runtime_security_for_agent,
-        )
-        .with_session_id(session.id.clone())
-        .on_approval(Box::new(
-            move |tool_name, args| {
-                let tx_clone = approval_tx_clone.clone();
-                let tool_name = tool_name.to_string();
-                let args = args.clone();
-                Box::pin(async move {
-                    let (res_tx, res_rx) = oneshot::channel();
-                    let _ = tx_clone.send(AgentEvent::ApprovalRequest {
-                        tool_name,
-                        args,
-                        tx: res_tx,
-                    });
-                    res_rx.await.unwrap_or(ApprovalResponse::DenyOnce)
-                })
-            },
-        )),
+    let mut agent = build_agent(
+        provider,
+        tools.clone(),
+        config.clone(),
+        runtime_security_for_agent,
+        session.id.clone(),
+        approval_tx_clone.clone(),
     );
     
     let messages: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
@@ -208,36 +188,63 @@ pub async fn run_tui(
                     continue; // Skip normal key handling while in approval mode
                 }
 
+                if app.state == AppState::Agents {
+                    match key.code {
+                        KeyCode::Up => app.move_agent_selection_up(),
+                        KeyCode::Down => app.move_agent_selection_down(),
+                        KeyCode::Enter => {
+                            let changed = app.select_current_agent();
+                            if changed {
+                                match create_provider(&app.provider, &app.model) {
+                                    Ok(new_provider) => {
+                                        let profile = AgentRegistry::get(&app.agent)
+                                            .unwrap_or_else(AgentRegistry::default_agent);
+                                        let config = agent_config(profile.name, None);
+                                        agent = build_agent(
+                                            new_provider,
+                                            tools.clone(),
+                                            config,
+                                            runtime_security.clone(),
+                                            session.id.clone(),
+                                            approval_tx.clone(),
+                                        );
+                                        app.push_chat(
+                                            "system",
+                                            &format!("Switched agent to @{}", app.agent),
+                                            ChatStyle::System,
+                                        );
+                                    }
+                                    Err(e) => {
+                                        app.push_chat(
+                                            "error",
+                                            &format!("Failed to switch agent: {}", e),
+                                            ChatStyle::Error,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        KeyCode::Esc => app.state = AppState::Idle,
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 if app.state == AppState::Config {
                     app.handle_config_key(key.code, &config_store);
 
                     if app.config_changed {
                         app.config_changed = false;
-                        match create_provider(&app.provider, &app.model) {
-                            Ok(new_provider) => {
-                                let tx_clone = approval_tx.clone();
-                agent = Arc::new(
-                                    Agent::new(
-                                        new_provider,
-                                        tools.clone(),
-                                        config.clone(),
-                                        runtime_security.clone(),
-                                    )
-                                    .with_session_id(session.id.clone())
-                                    .on_approval(Box::new(move |tool_name, args| {
-                                        let t_clone = tx_clone.clone();
-                                        let tool_name = tool_name.to_string();
-                                        let args = args.clone();
-                                        Box::pin(async move {
-                                            let (res_tx, res_rx) = oneshot::channel();
-                                            let _ = t_clone.send(AgentEvent::ApprovalRequest {
-                                                tool_name,
-                                                args,
-                                                tx: res_tx,
-                                            });
-                                            res_rx.await.unwrap_or(ApprovalResponse::DenyOnce)
-                                        })
-                                    })),
+                                match create_provider(&app.provider, &app.model) {
+                                    Ok(new_provider) => {
+                                        let config = agent_config(&app.agent, None);
+                                        agent = build_agent(
+                                            new_provider,
+                                            tools.clone(),
+                                            config,
+                                            runtime_security.clone(),
+                                            session.id.clone(),
+                                            approval_tx.clone(),
                                 );
                                 app.push_chat(
                                     "system",
@@ -269,6 +276,20 @@ pub async fn run_tui(
 
                                 if app.is_slash_menu_active() {
                                     if let Some(selected) = app.selected_slash_command() {
+                                        if handle_session_inspection_command(
+                                            &mut app,
+                                            &session_store,
+                                            &cwd,
+                                            &session.id,
+                                            selected,
+                                        )
+                                        .await
+                                        {
+                                            app.input.clear();
+                                            app.cursor_pos = 0;
+                                            app.sync_slash_menu_selection();
+                                            continue;
+                                        }
                                         if app.handle_slash_command(selected) {
                                             app.input.clear();
                                             app.cursor_pos = 0;
@@ -283,10 +304,57 @@ pub async fn run_tui(
                                     continue;
                                 }
 
+                                if handle_session_inspection_command(
+                                    &mut app,
+                                    &session_store,
+                                    &cwd,
+                                    &session.id,
+                                    input.trim(),
+                                )
+                                .await
+                                {
+                                    continue;
+                                }
+
                                 // Handle slash commands locally
                                 if app.handle_slash_command(input.trim()) {
                                     continue;
                                 }
+
+                                let (agent_for_run, prompt_for_run, routed_agent_name) =
+                                    if let Some((mentioned_agent, prompt)) =
+                                        App::parse_agent_mention(&input)
+                                    {
+                                        match create_provider(&app.provider, &app.model) {
+                                            Ok(provider) => {
+                                                let profile = AgentRegistry::get(&mentioned_agent)
+                                                    .unwrap_or_else(AgentRegistry::default_agent);
+                                                let config = agent_config(profile.name, None);
+                                                (
+                                                    build_agent(
+                                                        provider,
+                                                        tools.clone(),
+                                                        config,
+                                                        runtime_security.clone(),
+                                                        session.id.clone(),
+                                                        approval_tx.clone(),
+                                                    ),
+                                                    prompt,
+                                                    Some(profile.name.to_string()),
+                                                )
+                                            }
+                                            Err(e) => {
+                                                app.push_chat(
+                                                    "error",
+                                                    &format!("Failed to route to @{}: {}", mentioned_agent, e),
+                                                    ChatStyle::Error,
+                                                );
+                                                continue;
+                                            }
+                                        }
+                                    } else {
+                                        (agent.clone(), input.clone(), None)
+                                    };
 
                                 // Regular message — send to agent
                                 app.message_count += 1;
@@ -298,15 +366,16 @@ pub async fn run_tui(
                                 app.start_timer();
 
                                 // Spawn agent processing in background
-                                let agent_clone = agent.clone();
                                 let messages_clone = messages.clone();
                                 let tx_clone = tx.clone();
                                 let progress_tx = tx.clone();
-                                let input_owned = input.clone();
+                                let input_owned = prompt_for_run.clone();
+                                let routed_agent_name = routed_agent_name.clone();
                                 let is_rlm = app.rlm_enabled;
                                 let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
                                 tokio::spawn(async move {
+                                    let execution_agent = agent_for_run;
                                     if is_rlm {
                                         let rlm_config = rot_rlm::RlmConfig {
                                             on_progress: Some(Arc::new(move |msg: String| {
@@ -315,14 +384,16 @@ pub async fn run_tui(
                                             ..Default::default()
                                         };
                                         
-                                        let mut engine = rot_rlm::RlmEngine::new(rlm_config, agent_clone);
+                                        let mut engine = rot_rlm::RlmEngine::new(rlm_config, execution_agent);
                                         let result = engine.process(&input_owned, cwd.to_str().unwrap_or(".")).await;
                                         
                                         match result {
                                             Ok(ans) => {
                                                 let _ = tx_clone.send(AgentEvent::Response {
                                                     text: ans,
-                                                    tool_names: vec!["RLM Loop".to_string()],
+                                                    tool_names: routed_agent_name
+                                                        .map(|name| vec![format!("@{}", name), "RLM Loop".to_string()])
+                                                        .unwrap_or_else(|| vec!["RLM Loop".to_string()]),
                                                     input_tokens: 0,
                                                     output_tokens: 0, // Need accurate count later
                                                 });
@@ -334,7 +405,7 @@ pub async fn run_tui(
                                     } else {
                                         let mut msgs = messages_clone.lock().unwrap().clone();
                                         let result =
-                                            agent_clone.process(&mut msgs, &input_owned).await;
+                                            execution_agent.process(&mut msgs, &input_owned).await;
 
                                         // Update shared messages
                                         *messages_clone.lock().unwrap() = msgs;
@@ -354,7 +425,7 @@ pub async fn run_tui(
                                                 .collect::<Vec<_>>()
                                                 .join("\n");
 
-                                            let tool_names: Vec<String> = response
+                                            let mut tool_names: Vec<String> = response
                                                 .content
                                                 .iter()
                                                 .filter_map(|c| {
@@ -368,6 +439,9 @@ pub async fn run_tui(
                                                     }
                                                 })
                                                 .collect();
+                                            if let Some(name) = routed_agent_name {
+                                                tool_names.insert(0, format!("@{}", name));
+                                            }
 
                                             // Estimate tokens from text (~4 chars/token)
                                             let est_output = text.len() / 4;
@@ -439,6 +513,214 @@ pub async fn run_tui(
     Ok(())
 }
 
+async fn handle_session_inspection_command(
+    app: &mut App,
+    session_store: &rot_session::SessionStore,
+    cwd: &std::path::Path,
+    session_id: &str,
+    command: &str,
+) -> bool {
+    let trimmed = command.trim();
+    if trimmed == "/children" {
+        match render_child_sessions_summary(session_store, cwd, session_id).await {
+            Ok(summary) => app.push_chat("system", &summary, ChatStyle::System),
+            Err(error) => app.push_chat(
+                "error",
+                &format!("Failed to inspect child sessions: {}", error),
+                ChatStyle::Error,
+            ),
+        }
+        return true;
+    }
+
+    if let Some(child_id) = trimmed.strip_prefix("/child ").map(str::trim) {
+        match render_child_session_detail(session_store, cwd, session_id, child_id).await {
+            Ok(detail) => app.push_chat("system", &detail, ChatStyle::System),
+            Err(error) => app.push_chat(
+                "error",
+                &format!("Failed to inspect child session {}: {}", child_id, error),
+                ChatStyle::Error,
+            ),
+        }
+        return true;
+    }
+
+    false
+}
+
+async fn render_child_sessions_summary(
+    session_store: &rot_session::SessionStore,
+    cwd: &std::path::Path,
+    session_id: &str,
+) -> Result<String, String> {
+    let session = session_store
+        .load(cwd, session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let links = session
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            SessionEntry::ChildSessionLink {
+                child_session_id,
+                agent,
+                prompt,
+                ..
+            } => Some((child_session_id.clone(), agent.clone(), prompt.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if links.is_empty() {
+        return Ok("No delegated child sessions for this parent session.".to_string());
+    }
+
+    let mut lines = vec![
+        "Delegated child sessions:".to_string(),
+        String::new(),
+    ];
+
+    for (child_session_id, agent, prompt) in links {
+        let preview = match session_store.load(cwd, &child_session_id).await {
+            Ok(child) => child_session_preview(&child),
+            Err(_) => "(child session unavailable)".to_string(),
+        };
+        lines.push(format!(
+            "{}  @{}  {}",
+            child_session_id,
+            agent,
+            truncate_line(&prompt, 56)
+        ));
+        lines.push(format!("  {}", truncate_line(&preview, 84)));
+        lines.push(String::new());
+    }
+
+    lines.push("Use /child <id> to inspect a full child transcript.".to_string());
+    Ok(lines.join("\n"))
+}
+
+async fn render_child_session_detail(
+    session_store: &rot_session::SessionStore,
+    cwd: &std::path::Path,
+    parent_session_id: &str,
+    child_session_id: &str,
+) -> Result<String, String> {
+    let parent = session_store
+        .load(cwd, parent_session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let is_linked = parent.entries.iter().any(|entry| {
+        matches!(
+            entry,
+            SessionEntry::ChildSessionLink {
+                child_session_id: linked_id,
+                ..
+            } if linked_id == child_session_id
+        )
+    });
+
+    if !is_linked {
+        return Err("child session is not linked to the current parent session".to_string());
+    }
+
+    let child = session_store
+        .load(cwd, child_session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(format_child_session_detail(&child))
+}
+
+fn child_session_preview(session: &Session) -> String {
+    session
+        .entries
+        .iter()
+        .rev()
+        .find_map(|entry| match entry {
+            SessionEntry::Message { role, content, .. } if role == "assistant" => {
+                extract_text_from_content(content)
+            }
+            SessionEntry::ToolResult { output, .. } => Some(output.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "No transcript captured yet.".to_string())
+}
+
+fn format_child_session_detail(session: &Session) -> String {
+    let mut lines = vec![format!("Child session {}", session.id), String::new()];
+
+    for entry in &session.entries {
+        match entry {
+            SessionEntry::SessionStart {
+                model,
+                provider,
+                agent,
+                ..
+            } => {
+                lines.push(format!(
+                    "start   provider={} model={} agent={}",
+                    provider,
+                    model,
+                    agent.clone().unwrap_or_else(|| "unknown".to_string())
+                ));
+            }
+            SessionEntry::Message { role, content, .. } => {
+                let text = extract_text_from_content(content)
+                    .unwrap_or_else(|| "(non-text content)".to_string());
+                lines.push(format!("{role:<7} {}", truncate_line(&text, 100)));
+            }
+            SessionEntry::ToolCall {
+                name, arguments, ..
+            } => {
+                lines.push(format!(
+                    "tool    {} {}",
+                    name,
+                    truncate_line(&arguments.to_string(), 88)
+                ));
+            }
+            SessionEntry::ToolResult {
+                output, is_error, ..
+            } => {
+                let prefix = if *is_error { "error" } else { "result" };
+                lines.push(format!("{prefix:<7} {}", truncate_line(output, 100)));
+            }
+            SessionEntry::ChildSessionLink { .. }
+            | SessionEntry::Compaction { .. }
+            | SessionEntry::Branch { .. } => {}
+        }
+    }
+
+    lines.join("\n")
+}
+
+fn extract_text_from_content(content: &serde_json::Value) -> Option<String> {
+    let blocks = content.as_array()?;
+    let text = blocks
+        .iter()
+        .filter_map(|block| {
+            (block.get("type")?.as_str()? == "text")
+                .then(|| block.get("text")?.as_str().map(str::to_string))
+                .flatten()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn truncate_line(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{}...", truncated)
+    } else {
+        truncated
+    }
+}
+
 // Helper to rebuild provider mid-session when configuration details change
 fn create_provider(provider_name: &str, model: &str) -> std::result::Result<Box<dyn rot_provider::Provider>, String> {
     use rot_provider::Provider;
@@ -465,5 +747,104 @@ fn create_provider(provider_name: &str, model: &str) -> std::result::Result<Box<
             Ok(Box::new(provider))
         }
         other => Err(format!("Unknown provider: {}", other)),
+    }
+}
+
+fn build_agent(
+    provider: Box<dyn rot_provider::Provider>,
+    tools: rot_tools::ToolRegistry,
+    config: AgentConfig,
+    runtime_security: rot_core::RuntimeSecurityConfig,
+    session_id: String,
+    approval_tx: mpsc::UnboundedSender<AgentEvent>,
+) -> Arc<Agent> {
+    Arc::new(
+        Agent::new(provider, tools, config, runtime_security)
+            .with_session_id(session_id)
+            .on_approval(Box::new(move |tool_name, args| {
+                let tx_clone = approval_tx.clone();
+                let tool_name = tool_name.to_string();
+                let args = args.clone();
+                Box::pin(async move {
+                    let (res_tx, res_rx) = oneshot::channel();
+                    let _ = tx_clone.send(AgentEvent::ApprovalRequest {
+                        tool_name,
+                        args,
+                        tx: res_tx,
+                    });
+                    res_rx.await.unwrap_or(ApprovalResponse::DenyOnce)
+                })
+            })),
+    )
+}
+
+fn agent_config(agent_name: &str, initial_system_prompt: Option<String>) -> AgentConfig {
+    let system_prompt = if let Some(system_prompt) = initial_system_prompt {
+        system_prompt
+    } else if agent_name.eq_ignore_ascii_case("default") {
+        AgentRegistry::default_chat_system_prompt().to_string()
+    } else {
+        AgentRegistry::get(agent_name)
+            .unwrap_or_else(AgentRegistry::default_agent)
+            .system_prompt
+            .to_string()
+    };
+
+    AgentConfig {
+        agent_name: agent_name.to_string(),
+        system_prompt: Some(system_prompt),
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_text_from_content() {
+        let content = serde_json::json!([
+            {"type":"text","text":"hello"},
+            {"type":"tool_call","id":"1","name":"read","arguments":{}},
+            {"type":"text","text":"world"}
+        ]);
+
+        assert_eq!(
+            extract_text_from_content(&content).as_deref(),
+            Some("hello\nworld")
+        );
+    }
+
+    #[test]
+    fn test_format_child_session_detail_includes_messages() {
+        let session = Session {
+            id: "child-1".to_string(),
+            file_path: std::path::PathBuf::from("child-1.jsonl"),
+            cwd: std::path::PathBuf::from("."),
+            current_leaf: "msg-1".to_string(),
+            entries: vec![
+                SessionEntry::SessionStart {
+                    id: "child-1".to_string(),
+                    timestamp: 1,
+                    cwd: ".".to_string(),
+                    model: "gpt-4o".to_string(),
+                    provider: "openai".to_string(),
+                    parent_session_id: Some("parent-1".to_string()),
+                    parent_tool_call_id: None,
+                    agent: Some("review".to_string()),
+                },
+                SessionEntry::Message {
+                    id: "msg-1".to_string(),
+                    parent_id: None,
+                    timestamp: 2,
+                    role: "assistant".to_string(),
+                    content: serde_json::json!([{"type":"text","text":"done"}]),
+                },
+            ],
+        };
+
+        let formatted = format_child_session_detail(&session);
+        assert!(formatted.contains("Child session child-1"));
+        assert!(formatted.contains("assistant done"));
     }
 }

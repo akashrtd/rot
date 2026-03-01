@@ -66,6 +66,7 @@ pub enum AppState {
     Thinking,
     Streaming,
     Approval, // Paused for user permission
+    Agents,   // Agent selection overlay
     Config,   // Model & API Key overlay
     Error,
 }
@@ -93,6 +94,8 @@ pub const AVAILABLE_MODELS: &[(&str, &str)] = &[
 ];
 
 pub const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("/agents", "Switch agent"),
+    ("/children", "Inspect delegated child runs"),
     ("/help", "Show help"),
     ("/clear", "Clear conversation"),
     ("/models", "Switch model"),
@@ -121,6 +124,7 @@ pub struct App {
     pub status: String,
     pub model: String,
     pub provider: String,
+    pub agent: String,
     pub thinking_tick: u16,
     pub total_input_tokens: usize,
     pub total_output_tokens: usize,
@@ -143,7 +147,9 @@ pub struct App {
     // Config state
     pub config_ui_state: ConfigUiState,
     pub config_changed: bool,
+    pub agent_changed: bool,
     pub slash_menu_selected: usize,
+    pub agent_menu_selected: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -167,7 +173,7 @@ pub enum ChatStyle {
 // ── App Implementation ─────────────────────────────────────────────────
 
 impl App {
-    pub fn new(model: &str, provider: &str) -> Self {
+    pub fn new(model: &str, provider: &str, agent: &str) -> Self {
         Self {
             state: AppState::Idle,
             input_mode: InputMode::Insert,
@@ -181,6 +187,7 @@ impl App {
             status: "Ready".to_string(),
             model: model.to_string(),
             provider: provider.to_string(),
+            agent: agent.to_string(),
             thinking_tick: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
@@ -198,7 +205,9 @@ impl App {
             rlm_iterating: false,
             config_ui_state: ConfigUiState::default(),
             config_changed: false,
+            agent_changed: false,
             slash_menu_selected: 0,
+            agent_menu_selected: 0,
         }
     }
 
@@ -227,6 +236,7 @@ impl App {
              ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n\
              ┃  provider : {:<23}┃\n\
              ┃  model    : {:<23}┃\n\
+             ┃  agent    : {:<23}┃\n\
              ┃  cwd      : {:<23}┃\n\
              ┃  rlm      : {:<23}┃\n\
              ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\
@@ -235,6 +245,7 @@ impl App {
             ASCII_BANNER.trim_matches('\n'),
             self.provider,
             self.model,
+            self.agent,
             if short_cwd.len() > 23 {
                 format!("…{}", &short_cwd[short_cwd.len().saturating_sub(22)..])
             } else {
@@ -279,7 +290,10 @@ impl App {
             "/help" => {
                 self.push_chat(
                     "system",
-                    "/help       — show this message\n\
+                    "/agents     — switch active agent\n\
+                     /children   — list delegated child runs\n\
+                     /child ID   — inspect one child session\n\
+                     /help       — show this message\n\
                      /clear      — clear conversation\n\
                      /model      — show current model\n\
                      /model NAME — switch model\n\
@@ -295,6 +309,11 @@ impl App {
                 self.total_input_tokens = 0;
                 self.total_output_tokens = 0;
                 self.push_chat("system", "Conversation cleared.", ChatStyle::System);
+                true
+            }
+            "/agents" => {
+                self.state = AppState::Agents;
+                self.sync_agent_menu_selection();
                 true
             }
             "/models" | "/model" => {
@@ -334,6 +353,63 @@ impl App {
         self.cursor_pos = 0;
         self.slash_menu_selected = 0;
         text
+    }
+
+    pub fn all_agents(&self) -> Vec<rot_core::AgentProfile> {
+        rot_core::AgentRegistry::builtins().to_vec()
+    }
+
+    pub fn sync_agent_menu_selection(&mut self) {
+        let agents = self.all_agents();
+        self.agent_menu_selected = agents
+            .iter()
+            .position(|profile| profile.name == self.agent)
+            .unwrap_or(self.agent_menu_selected.min(agents.len().saturating_sub(1)));
+    }
+
+    pub fn move_agent_selection_up(&mut self) {
+        let count = self.all_agents().len();
+        if count == 0 {
+            return;
+        }
+        if self.agent_menu_selected == 0 {
+            self.agent_menu_selected = count - 1;
+        } else {
+            self.agent_menu_selected -= 1;
+        }
+    }
+
+    pub fn move_agent_selection_down(&mut self) {
+        let count = self.all_agents().len();
+        if count == 0 {
+            return;
+        }
+        self.agent_menu_selected = (self.agent_menu_selected + 1) % count;
+    }
+
+    pub fn select_current_agent(&mut self) -> bool {
+        let agents = self.all_agents();
+        let Some(profile) = agents.get(self.agent_menu_selected).copied() else {
+            return false;
+        };
+
+        let changed = self.agent != profile.name;
+        self.agent = profile.name.to_string();
+        self.state = AppState::Idle;
+        self.agent_changed = changed;
+        changed
+    }
+
+    pub fn parse_agent_mention(input: &str) -> Option<(String, String)> {
+        let trimmed = input.trim();
+        let rest = trimmed.strip_prefix('@')?;
+        let (name, prompt) = rest.split_once(char::is_whitespace)?;
+        let profile = rot_core::AgentRegistry::get(name)?;
+        let prompt = prompt.trim();
+        if prompt.is_empty() {
+            return None;
+        }
+        Some((profile.name.to_string(), prompt.to_string()))
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -573,6 +649,8 @@ impl App {
             self.render_approval_dialog(frame, area);
         } else if self.state == AppState::Config {
             self.render_config_dialog(frame, area);
+        } else if self.state == AppState::Agents {
+            self.render_agents_dialog(frame, area);
         }
     }
 
@@ -587,6 +665,7 @@ impl App {
             }
             AppState::Streaming => "◉",
             AppState::Approval => "⚠",
+            AppState::Agents => "◈",
             AppState::Config => "⚙",
             AppState::Error => "✖",
         };
@@ -596,6 +675,7 @@ impl App {
             AppState::Thinking => COLOR_THINKING,
             AppState::Streaming => COLOR_ACCENT,
             AppState::Approval => COLOR_ERROR,
+            AppState::Agents => COLOR_BANNER,
             AppState::Config => COLOR_DIM,
             AppState::Error => COLOR_ERROR,
         };
@@ -767,6 +847,7 @@ impl App {
             },
             AppState::Thinking | AppState::Streaming => COLOR_BORDER,
             AppState::Approval | AppState::Error => COLOR_ERROR,
+            AppState::Agents => COLOR_BANNER,
             AppState::Config => COLOR_BORDER,
         };
 
@@ -787,6 +868,7 @@ impl App {
             AppState::Idle => Style::default().fg(COLOR_CODE_FG),
             AppState::Thinking | AppState::Streaming => Style::default().fg(COLOR_DIM),
             AppState::Approval | AppState::Error => Style::default().fg(COLOR_ERROR),
+            AppState::Agents => Style::default().fg(COLOR_DIM),
             AppState::Config => Style::default().fg(COLOR_DIM),
         };
 
@@ -840,12 +922,17 @@ impl App {
             COLOR_DIM
         };
 
-        // Left side: MODE │ provider:model │ context% │ tokens │ cost
+        // Left side: MODE │ provider:model │ agent │ context% │ tokens │ cost
         let mut left = vec![
             Span::styled(format!(" {mode_str} "), Style::default().fg(Color::Black).bg(mode_color).bold()),
             Span::styled(
                 format!("  {}:{}", self.provider, self.model),
                 Style::default().fg(COLOR_BAR_FG),
+            ),
+            Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
+            Span::styled(
+                format!("@{}", self.agent),
+                Style::default().fg(COLOR_ACCENT),
             ),
             Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
             Span::styled(
@@ -1140,6 +1227,53 @@ impl App {
         }
     }
 
+    fn render_agents_dialog(&self, frame: &mut Frame, area: Rect) {
+        use ratatui::widgets::{Clear, List, ListItem};
+
+        let agents = self.all_agents();
+        if agents.is_empty() {
+            return;
+        }
+
+        let popup_area = Rect {
+            x: area.x + (area.width.saturating_sub(62)) / 2,
+            y: area.y + (area.height.saturating_sub(12)) / 2,
+            width: 62.min(area.width),
+            height: 12.min(area.height),
+        };
+
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .title(" Select Agent (/agents) ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_BANNER));
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        let items: Vec<ListItem> = agents
+            .iter()
+            .enumerate()
+            .map(|(idx, profile)| {
+                let selected = idx == self.agent_menu_selected;
+                let mode = if profile.is_subagent() { "subagent" } else { "primary" };
+                let prefix = if selected { " ▶ " } else { "   " };
+                let style = if selected {
+                    Style::default().fg(COLOR_ACCENT).bold()
+                } else {
+                    Style::default().fg(COLOR_CODE_FG)
+                };
+                ListItem::new(format!(
+                    "{prefix}{:<10} {:<9} {}",
+                    profile.name, mode, profile.description
+                ))
+                .style(style)
+            })
+            .collect();
+
+        frame.render_widget(List::new(items), inner);
+    }
+
     // ── Markdown Parser ────────────────────────────────────────────────
 
     fn parse_markdown<'a>(text: &'a str, base: Style) -> Vec<Span<'a>> {
@@ -1226,7 +1360,7 @@ mod tests {
 
     #[test]
     fn test_app_creation() {
-        let app = App::new("claude-sonnet-4-20250514", "anthropic");
+        let app = App::new("claude-sonnet-4-20250514", "anthropic", "default");
         assert_eq!(app.state, AppState::Idle);
         assert!(app.running);
         assert!(app.input.is_empty());
@@ -1235,7 +1369,7 @@ mod tests {
 
     #[test]
     fn test_input_editing() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.insert_char('h');
         app.insert_char('i');
         assert_eq!(app.input, "hi");
@@ -1247,7 +1381,7 @@ mod tests {
 
     #[test]
     fn test_submit_input() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.insert_char('h');
         app.insert_char('i');
         let text = app.submit_input();
@@ -1257,7 +1391,7 @@ mod tests {
 
     #[test]
     fn test_push_chat() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.push_chat("user", "Hello!", ChatStyle::User);
         assert_eq!(app.chat_lines.len(), 1);
         assert!(app.auto_scroll);
@@ -1265,7 +1399,7 @@ mod tests {
 
     #[test]
     fn test_auto_scroll_on_push() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.auto_scroll = false;
         app.push_chat("user", "Hello!", ChatStyle::User);
         assert!(app.auto_scroll);
@@ -1273,14 +1407,14 @@ mod tests {
 
     #[test]
     fn test_slash_help() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         assert!(app.handle_slash_command("/help"));
         assert_eq!(app.chat_lines.len(), 1);
     }
 
     #[test]
     fn test_slash_clear() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.push_chat("user", "test", ChatStyle::User);
         assert!(app.handle_slash_command("/clear"));
         assert_eq!(app.chat_lines.len(), 1);
@@ -1288,20 +1422,20 @@ mod tests {
 
     #[test]
     fn test_slash_unknown() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         assert!(app.handle_slash_command("/foo"));
         assert!(app.chat_lines[0].content.contains("Unknown"));
     }
 
     #[test]
     fn test_non_slash() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         assert!(!app.handle_slash_command("hello"));
     }
 
     #[test]
     fn test_multi_line() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.insert_char('a');
         app.insert_newline();
         app.insert_char('b');
@@ -1322,7 +1456,7 @@ mod tests {
 
     #[test]
     fn test_tokens() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.record_tokens(100, 50);
         assert_eq!(app.total_input_tokens, 100);
         app.record_tokens(200, 100);
@@ -1338,7 +1472,7 @@ mod tests {
 
     #[test]
     fn test_welcome_once() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.show_welcome();
         let n = app.chat_lines.len();
         app.show_welcome();
@@ -1354,7 +1488,7 @@ mod tests {
 
     #[test]
     fn test_slash_menu_active_and_filtered() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.input = "/m".to_string();
         app.cursor_pos = app.input.len();
         let items = app.filtered_slash_commands();
@@ -1365,7 +1499,7 @@ mod tests {
 
     #[test]
     fn test_slash_selection_wraps() {
-        let mut app = App::new("test", "test");
+        let mut app = App::new("test", "test", "default");
         app.input = "/".to_string();
         app.cursor_pos = 1;
         app.sync_slash_menu_selection();
@@ -1376,5 +1510,34 @@ mod tests {
         );
         app.move_slash_selection_down();
         assert_eq!(app.slash_menu_selected, 0);
+    }
+
+    #[test]
+    fn test_slash_agents_opens_dialog() {
+        let mut app = App::new("test", "test", "default");
+        assert!(app.handle_slash_command("/agents"));
+        assert_eq!(app.state, AppState::Agents);
+    }
+
+    #[test]
+    fn test_select_current_agent_updates_active_agent() {
+        let mut app = App::new("test", "test", "default");
+        app.state = AppState::Agents;
+        app.agent_menu_selected = app
+            .all_agents()
+            .iter()
+            .position(|profile| profile.name == "plan")
+            .unwrap();
+
+        assert!(app.select_current_agent());
+        assert_eq!(app.agent, "plan");
+        assert_eq!(app.state, AppState::Idle);
+    }
+
+    #[test]
+    fn test_parse_agent_mention_extracts_prompt() {
+        let parsed = App::parse_agent_mention("@review inspect this diff").unwrap();
+        assert_eq!(parsed.0, "review");
+        assert_eq!(parsed.1, "inspect this diff");
     }
 }

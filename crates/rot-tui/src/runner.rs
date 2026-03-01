@@ -41,12 +41,15 @@ enum AgentEvent {
 }
 
 /// Run the TUI application.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
     provider: Box<dyn rot_provider::Provider>,
     tools: rot_tools::ToolRegistry,
     session_store: rot_session::SessionStore,
     model: &str,
     provider_name: &str,
+    agent_name: &str,
+    system_prompt: String,
     runtime_security: rot_core::RuntimeSecurityConfig,
 ) -> std::io::Result<()> {
     // Setup terminal
@@ -62,21 +65,15 @@ pub async fn run_tui(
 
     // Create session
     let cwd = std::env::current_dir()?;
-    let _session = session_store
+    let session = session_store
         .create(&cwd, model, provider_name)
         .await
         .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     // Build agent (shared for background tasks)
     let config = AgentConfig {
-        system_prompt: Some(
-            "You are rot, a powerful AI coding assistant. \
-             You have access to tools for reading, writing, and editing files, \
-             running shell commands, searching code, and fetching URLs. \
-             Be concise and helpful. Use markdown formatting in your responses \
-             (bold for emphasis, backticks for code)."
-                .to_string(),
-        ),
+        agent_name: agent_name.to_string(),
+        system_prompt: Some(system_prompt),
         ..Default::default()
     };
 
@@ -97,6 +94,7 @@ pub async fn run_tui(
             config.clone(),
             runtime_security_for_agent,
         )
+        .with_session_id(session.id.clone())
         .on_approval(Box::new(
             move |tool_name, args| {
                 let tx_clone = approval_tx_clone.clone();
@@ -119,7 +117,7 @@ pub async fn run_tui(
 
     // Check if the current provider needs an API key on first launch
     let has_key = config_store.load().api_keys.get(app.provider.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
-        || std::env::var(&format!("{}_API_KEY", app.provider.to_uppercase())).is_ok();
+        || std::env::var(format!("{}_API_KEY", app.provider.to_uppercase())).is_ok();
 
     if !has_key {
         app.state = AppState::Config;
@@ -225,6 +223,7 @@ pub async fn run_tui(
                                         config.clone(),
                                         runtime_security.clone(),
                                     )
+                                    .with_session_id(session.id.clone())
                                     .on_approval(Box::new(move |tool_name, args| {
                                         let t_clone = tx_clone.clone();
                                         let tool_name = tool_name.to_string();
@@ -309,10 +308,12 @@ pub async fn run_tui(
 
                                 tokio::spawn(async move {
                                     if is_rlm {
-                                        let mut rlm_config = rot_rlm::RlmConfig::default();
-                                        rlm_config.on_progress = Some(Arc::new(move |msg: String| {
-                                            let _ = progress_tx.send(AgentEvent::Progress(msg));
-                                        }));
+                                        let rlm_config = rot_rlm::RlmConfig {
+                                            on_progress: Some(Arc::new(move |msg: String| {
+                                                let _ = progress_tx.send(AgentEvent::Progress(msg));
+                                            })),
+                                            ..Default::default()
+                                        };
                                         
                                         let mut engine = rot_rlm::RlmEngine::new(rlm_config, agent_clone);
                                         let result = engine.process(&input_owned, cwd.to_str().unwrap_or(".")).await;

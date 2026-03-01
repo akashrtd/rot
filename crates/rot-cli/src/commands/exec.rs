@@ -1,7 +1,8 @@
 //! Single-shot exec command.
 
-use rot_core::{Agent, AgentConfig, ApprovalPolicy, ContentBlock, Message, RuntimeSecurityConfig, SandboxMode};
+use rot_core::{Agent, AgentConfig, AgentRegistry, ApprovalPolicy, ContentBlock, Message, RuntimeSecurityConfig, SandboxMode};
 use rot_provider::{AnthropicProvider, Provider, new_openai_provider, new_zai_provider};
+use rot_session::SessionStore;
 use rot_tools::ToolRegistry;
 use serde::Serialize;
 use serde_json::Value;
@@ -38,10 +39,12 @@ struct UsageSummary {
 }
 
 /// Execute a single prompt and print the result.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     prompt: &str,
     model: Option<&str>,
     provider_name: &str,
+    agent_name: Option<&str>,
     rlm: bool,
     context_path: Option<&str>,
     runtime_security: RuntimeSecurityConfig,
@@ -49,6 +52,7 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let started = Instant::now();
     let provider = create_provider(provider_name, model)?;
+    let agent_profile = AgentRegistry::resolve(agent_name)?;
     let provider_label = provider.name().to_string();
     let model_label = provider.current_model().to_string();
     let sandbox_mode_label = sandbox_mode_label(runtime_security.sandbox_mode).to_string();
@@ -58,14 +62,18 @@ pub async fn run(
     rot_tools::register_all(&mut tools);
 
     let config = AgentConfig {
-        system_prompt: Some(
-            "You are rot, an AI coding assistant. Be concise and direct.".to_string(),
-        ),
+        agent_name: agent_profile.name.to_string(),
+        system_prompt: Some(agent_profile.system_prompt.to_string()),
         max_tokens: Some(4096),
         ..Default::default()
     };
 
-    let agent = std::sync::Arc::new(Agent::new(provider, tools, config, runtime_security.clone()));
+    let session_store = SessionStore::new();
+    let cwd = std::env::current_dir()?;
+    let session = session_store.create(&cwd, &model_label, &provider_label).await?;
+    let agent = std::sync::Arc::new(
+        Agent::new(provider, tools, config, runtime_security.clone()).with_session_id(session.id),
+    );
 
     if rlm {
         let ctx_path =

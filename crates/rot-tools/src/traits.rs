@@ -4,28 +4,51 @@ use crate::error::ToolError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Filesystem sandbox mode for tool execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SandboxMode {
     /// Read-only workspace access.
     ReadOnly,
     /// Allow workspace writes, deny writes outside workspace.
+    #[default]
     WorkspaceWrite,
     /// No sandbox restrictions.
     DangerFullAccess,
 }
 
-impl Default for SandboxMode {
-    fn default() -> Self {
-        Self::WorkspaceWrite
-    }
+/// Request payload for delegated subagent execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRequest {
+    /// Subagent name to invoke.
+    pub agent: String,
+    /// Prompt for the delegated task.
+    pub prompt: String,
+}
+
+/// Result of delegated subagent execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskExecution {
+    /// Subagent final text.
+    pub final_text: String,
+    /// Child session identifier if one was created.
+    pub child_session_id: Option<String>,
+    /// Agent that handled the task.
+    pub agent: String,
+}
+
+/// Callback interface used by the `task` tool.
+#[async_trait]
+pub trait TaskRunner: Send + Sync {
+    /// Execute a delegated task and return the final subagent response.
+    async fn run_task(&self, request: TaskRequest) -> Result<TaskExecution, ToolError>;
 }
 
 /// Context provided to tools during execution.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ToolContext {
     /// Current working directory.
     pub working_dir: PathBuf,
@@ -37,6 +60,27 @@ pub struct ToolContext {
     pub sandbox_mode: SandboxMode,
     /// Whether outbound network access is allowed.
     pub network_access: bool,
+    /// Current delegated task depth.
+    pub task_depth: usize,
+    /// Maximum delegated task depth allowed.
+    pub max_task_depth: usize,
+    /// Optional delegated task runner for the `task` tool.
+    pub task_runner: Option<Arc<dyn TaskRunner>>,
+}
+
+impl std::fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("working_dir", &self.working_dir)
+            .field("session_id", &self.session_id)
+            .field("timeout", &self.timeout)
+            .field("sandbox_mode", &self.sandbox_mode)
+            .field("network_access", &self.network_access)
+            .field("task_depth", &self.task_depth)
+            .field("max_task_depth", &self.max_task_depth)
+            .field("has_task_runner", &self.task_runner.is_some())
+            .finish()
+    }
 }
 
 impl Default for ToolContext {
@@ -47,6 +91,9 @@ impl Default for ToolContext {
             timeout: Duration::from_secs(120),
             sandbox_mode: SandboxMode::WorkspaceWrite,
             network_access: false,
+            task_depth: 0,
+            max_task_depth: 1,
+            task_runner: None,
         }
     }
 }

@@ -10,11 +10,13 @@ use crate::message::{ContentBlock, Message, Role};
 use crate::permission::{ApprovalResponse, PermissionSystem};
 use crate::security::{RuntimeSecurityConfig, SandboxMode};
 use futures::StreamExt;
+use rot_session::{SessionEntry, SessionStore};
 use rot_provider::{
     Provider, ProviderContent, ProviderError, ProviderMessage, Request, StopReason, StreamEvent,
     ToolDefinition,
 };
-use rot_tools::{ToolContext, ToolRegistry};
+use rot_tools::{TaskExecution, TaskRequest, TaskRunner, ToolContext, ToolRegistry};
+use std::path::PathBuf;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -26,6 +28,8 @@ const MAX_ITERATIONS: usize = 50;
 pub struct AgentConfig {
     /// Maximum number of tool-use iterations before stopping.
     pub max_iterations: usize,
+    /// Selected agent name.
+    pub agent_name: String,
     /// System prompt.
     pub system_prompt: Option<String>,
     /// Maximum tokens per response.
@@ -36,6 +40,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             max_iterations: MAX_ITERATIONS,
+            agent_name: "default".to_string(),
             system_prompt: None,
             max_tokens: None,
         }
@@ -61,6 +66,7 @@ pub struct Agent {
     tools: ToolRegistry,
     config: AgentConfig,
     runtime_security: RuntimeSecurityConfig,
+    session_id: Option<String>,
     on_event: Option<EventCallback>,
     on_approval: Option<ApprovalCallback>,
     permission_system: Arc<Mutex<PermissionSystem>>,
@@ -80,10 +86,17 @@ impl Agent {
             tools,
             config,
             runtime_security,
+            session_id: None,
             on_event: None,
             on_approval: None,
             permission_system: Arc::new(Mutex::new(permission_system)),
         }
+    }
+
+    /// Attach a session ID to this agent instance.
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
     }
 
     /// Set the event callback for streaming updates.
@@ -103,17 +116,33 @@ impl Agent {
     /// This runs the full agent loop: send to provider → parse response →
     /// execute tools → send tool results → repeat until done.
     pub async fn process(
-        &self,
+        self: &Arc<Self>,
         messages: &mut Vec<Message>,
         user_input: &str,
+    ) -> Result<Message, AgentProcessError> {
+        let invocation = AgentInvocation {
+            session_id: self.session_id.clone().unwrap_or_default(),
+            system_prompt: self.config.system_prompt.clone(),
+            task_depth: 0,
+        };
+        self.process_with_invocation(messages, user_input, invocation)
+            .await
+    }
+
+    async fn process_with_invocation(
+        self: &Arc<Self>,
+        messages: &mut Vec<Message>,
+        user_input: &str,
+        invocation: AgentInvocation,
     ) -> Result<Message, AgentProcessError> {
         // Add user message
         let user_msg = Message::user(user_input);
         messages.push(user_msg);
 
+        let working_dir = std::env::current_dir().unwrap_or_default();
         let tool_ctx = ToolContext {
-            working_dir: std::env::current_dir().unwrap_or_default(),
-            session_id: String::new(),
+            working_dir: working_dir.clone(),
+            session_id: invocation.session_id.clone(),
             timeout: std::time::Duration::from_secs(120),
             sandbox_mode: match self.runtime_security.sandbox_mode {
                 SandboxMode::ReadOnly => rot_tools::SandboxMode::ReadOnly,
@@ -122,6 +151,14 @@ impl Agent {
             },
             network_access: self.runtime_security.sandbox_network_access
                 || self.runtime_security.sandbox_mode == SandboxMode::DangerFullAccess,
+            task_depth: invocation.task_depth,
+            max_task_depth: 1,
+            task_runner: Some(Arc::new(AgentTaskRunner {
+                agent: Arc::clone(self),
+                parent_session_id: invocation.session_id.clone(),
+                working_dir,
+                task_depth: invocation.task_depth,
+            })),
         };
 
         for _iteration in 0..self.config.max_iterations {
@@ -132,7 +169,7 @@ impl Agent {
             let request = Request {
                 messages: provider_messages,
                 tools: tool_defs,
-                system: self.config.system_prompt.clone(),
+                system: invocation.system_prompt.clone(),
                 max_tokens: self.config.max_tokens,
                 thinking: None,
             };
@@ -358,6 +395,110 @@ impl Agent {
     }
 }
 
+#[derive(Clone)]
+struct AgentInvocation {
+    session_id: String,
+    system_prompt: Option<String>,
+    task_depth: usize,
+}
+
+struct AgentTaskRunner {
+    agent: Arc<Agent>,
+    parent_session_id: String,
+    working_dir: PathBuf,
+    task_depth: usize,
+}
+
+#[async_trait::async_trait]
+impl TaskRunner for AgentTaskRunner {
+    async fn run_task(&self, request: TaskRequest) -> Result<TaskExecution, rot_tools::ToolError> {
+        let profile = crate::AgentRegistry::get(&request.agent).ok_or_else(|| {
+            rot_tools::ToolError::InvalidParameters(format!(
+                "Unknown agent '{}'",
+                request.agent
+            ))
+        })?;
+
+        if !profile.is_subagent() {
+            return Err(rot_tools::ToolError::PermissionDenied(format!(
+                "Agent '{}' is not a subagent",
+                profile.name
+            )));
+        }
+
+        let session_store = SessionStore::new();
+        let child_session = if self.parent_session_id.is_empty() {
+            None
+        } else {
+            let child = session_store
+                .create_child(
+                    &self.working_dir,
+                    self.agent.provider.current_model(),
+                    self.agent.provider.name(),
+                    &self.parent_session_id,
+                    None,
+                    Some(profile.name),
+                )
+                .await
+                .map_err(|e| {
+                    rot_tools::ToolError::ExecutionError(format!(
+                        "Failed to create child session: {e}"
+                    ))
+                })?;
+
+            session_store
+                .append_by_id(
+                    &self.working_dir,
+                    &self.parent_session_id,
+                    SessionEntry::ChildSessionLink {
+                        id: ulid::Ulid::new().to_string(),
+                        parent_session_id: self.parent_session_id.clone(),
+                        child_session_id: child.id.clone(),
+                        timestamp: current_timestamp(),
+                        agent: profile.name.to_string(),
+                        prompt: request.prompt.clone(),
+                    },
+                )
+                .await
+                .map_err(|e| {
+                    rot_tools::ToolError::ExecutionError(format!(
+                        "Failed to link child session: {e}"
+                    ))
+                })?;
+
+            Some(child)
+        };
+
+        let child_session_id = child_session.as_ref().map(|session| session.id.clone());
+        let invocation = AgentInvocation {
+            session_id: child_session_id.clone().unwrap_or_default(),
+            system_prompt: Some(profile.system_prompt.to_string()),
+            task_depth: self.task_depth + 1,
+        };
+        let mut messages = Vec::new();
+        let response = self
+            .agent
+            .process_with_invocation(&mut messages, &request.prompt, invocation)
+            .await
+            .map_err(|e| {
+                rot_tools::ToolError::ExecutionError(format!("Subagent execution failed: {e}"))
+            })?;
+
+        Ok(TaskExecution {
+            final_text: response.text(),
+            child_session_id,
+            agent: profile.name.to_string(),
+        })
+    }
+}
+
+fn current_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 /// Pending tool call being accumulated from streaming events.
 struct PendingToolCall {
     id: String,
@@ -378,6 +519,8 @@ pub enum AgentProcessError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::stream::{self, BoxStream, StreamExt};
+    use std::sync::Mutex as StdMutex;
 
     #[test]
     fn test_agent_config_default() {
@@ -414,8 +557,48 @@ mod tests {
         assert_eq!(converted[1].role, "assistant");
     }
 
+    #[tokio::test]
+    async fn test_task_tool_delegates_to_subagent() {
+        let provider = Box::new(TaskFlowProvider {
+            step: StdMutex::new(0),
+        });
+        let mut tools = ToolRegistry::new();
+        rot_tools::register_all(&mut tools);
+        let agent = Arc::new(Agent::new(
+            provider,
+            tools,
+            AgentConfig::default(),
+            RuntimeSecurityConfig {
+                approval_policy: crate::security::ApprovalPolicy::Never,
+                ..RuntimeSecurityConfig::default()
+            },
+        ));
+
+        let mut messages = Vec::new();
+        let response = agent.process(&mut messages, "start").await.unwrap();
+        assert_eq!(response.text(), "parent final");
+
+        let tool_result = messages
+            .iter()
+            .find_map(|message| {
+                message.content.iter().find_map(|block| match block {
+                    ContentBlock::ToolResult {
+                        content, metadata, ..
+                    } => Some((content.clone(), metadata.clone())),
+                    _ => None,
+                })
+            })
+            .expect("expected task tool result");
+        assert_eq!(tool_result.0, "subagent result");
+        assert!(tool_result.1["child_session_id"].is_null());
+    }
+
     // Minimal dummy provider for testing conversion logic
     struct DummyProvider;
+
+    struct TaskFlowProvider {
+        step: StdMutex<usize>,
+    }
 
     #[async_trait::async_trait]
     impl Provider for DummyProvider {
@@ -442,6 +625,80 @@ mod tests {
             &self,
             _: Request,
         ) -> Result<rot_provider::Response, ProviderError> {
+            unimplemented!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for TaskFlowProvider {
+        fn name(&self) -> &str {
+            "dummy"
+        }
+
+        fn models(&self) -> Vec<rot_provider::ModelInfo> {
+            vec![]
+        }
+
+        fn current_model(&self) -> &str {
+            "dummy"
+        }
+
+        fn set_model(&mut self, _: &str) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        async fn stream(
+            &self,
+            _: Request,
+        ) -> Result<BoxStream<'_, Result<StreamEvent, ProviderError>>, ProviderError> {
+            let step = {
+                let mut lock = self.step.lock().unwrap();
+                *lock += 1;
+                *lock
+            };
+
+            let events = match step {
+                1 => vec![
+                    Ok(StreamEvent::ToolCallStart {
+                        id: "task-call-1".to_string(),
+                        name: "task".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallDelta {
+                        id: "task-call-1".to_string(),
+                        delta:
+                            "{\"agent\":\"review\",\"prompt\":\"inspect these changes\"}"
+                                .to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallEnd {
+                        id: "task-call-1".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::ToolUse,
+                    }),
+                ],
+                2 => vec![
+                    Ok(StreamEvent::TextDelta {
+                        delta: "subagent result".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::EndTurn,
+                    }),
+                ],
+                3 => vec![
+                    Ok(StreamEvent::TextDelta {
+                        delta: "parent final".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::EndTurn,
+                    }),
+                ],
+                other => panic!("unexpected provider step {other}"),
+            };
+
+            Ok(stream::iter(events).boxed())
+        }
+
+        async fn complete(&self, _: Request) -> Result<rot_provider::Response, ProviderError> {
             unimplemented!()
         }
     }

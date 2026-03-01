@@ -25,7 +25,13 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         None | Some(Commands::Chat) => {
             let security = cli.resolve_runtime_security(&config);
-            commands::chat::run(cli.model.as_deref(), &cli.provider, security).await?;
+            commands::chat::run(
+                cli.model.as_deref(),
+                &cli.provider,
+                cli.agent.as_deref(),
+                security,
+            )
+            .await?;
         }
         Some(Commands::Exec {
             ref prompt,
@@ -46,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
                 prompt,
                 cli.model.as_deref(),
                 &cli.provider,
+                cli.agent.as_deref(),
                 rlm,
                 context.as_deref(),
                 security,

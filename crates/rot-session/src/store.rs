@@ -65,6 +65,40 @@ impl SessionStore {
         model: &str,
         provider: &str,
     ) -> Result<Session, SessionError> {
+        self.create_with_parent(cwd, model, provider, None, None, None)
+            .await
+    }
+
+    /// Create a new child session linked to a parent session.
+    pub async fn create_child(
+        &self,
+        cwd: &Path,
+        model: &str,
+        provider: &str,
+        parent_session_id: &str,
+        parent_tool_call_id: Option<&str>,
+        agent: Option<&str>,
+    ) -> Result<Session, SessionError> {
+        self.create_with_parent(
+            cwd,
+            model,
+            provider,
+            Some(parent_session_id),
+            parent_tool_call_id,
+            agent,
+        )
+        .await
+    }
+
+    async fn create_with_parent(
+        &self,
+        cwd: &Path,
+        model: &str,
+        provider: &str,
+        parent_session_id: Option<&str>,
+        parent_tool_call_id: Option<&str>,
+        agent: Option<&str>,
+    ) -> Result<Session, SessionError> {
         let id = ulid::Ulid::new().to_string();
         let file_path = self.session_path(cwd, &id);
 
@@ -84,6 +118,9 @@ impl SessionStore {
             cwd: cwd.to_string_lossy().to_string(),
             model: model.to_string(),
             provider: provider.to_string(),
+            parent_session_id: parent_session_id.map(str::to_string),
+            parent_tool_call_id: parent_tool_call_id.map(str::to_string),
+            agent: agent.map(str::to_string),
         };
 
         // Write start entry
@@ -155,6 +192,17 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Append an entry to an existing session identified by ID.
+    pub async fn append_by_id(
+        &self,
+        cwd: &Path,
+        session_id: &str,
+        entry: SessionEntry,
+    ) -> Result<(), SessionError> {
+        let mut session = self.load(cwd, session_id).await?;
+        self.append(&mut session, entry).await
+    }
+
     /// List recent sessions for a working directory.
     pub async fn list_recent(
         &self,
@@ -212,6 +260,7 @@ impl SessionStore {
                 cwd,
                 model,
                 provider,
+                ..
             } => Ok(SessionMeta {
                 id,
                 created_at: timestamp,
@@ -284,6 +333,69 @@ mod tests {
         let loaded = store.load(&cwd, &session_id).await.unwrap();
         assert_eq!(loaded.entries.len(), 2);
         assert_eq!(loaded.current_leaf, "msg1");
+    }
+
+    #[tokio::test]
+    async fn test_create_child_session() {
+        let dir = TempDir::new().unwrap();
+        let store = SessionStore::with_dir(dir.path());
+        let cwd = dir.path().join("project");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let child = store
+            .create_child(
+                &cwd,
+                "claude",
+                "anthropic",
+                "parent-session",
+                Some("tool-call-1"),
+                Some("review"),
+            )
+            .await
+            .unwrap();
+
+        match &child.entries[0] {
+            SessionEntry::SessionStart {
+                parent_session_id,
+                parent_tool_call_id,
+                agent,
+                ..
+            } => {
+                assert_eq!(parent_session_id.as_deref(), Some("parent-session"));
+                assert_eq!(parent_tool_call_id.as_deref(), Some("tool-call-1"));
+                assert_eq!(agent.as_deref(), Some("review"));
+            }
+            other => panic!("expected session start, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_append_by_id() {
+        let dir = TempDir::new().unwrap();
+        let store = SessionStore::with_dir(dir.path());
+        let cwd = dir.path().join("project");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let session = store.create(&cwd, "claude", "anthropic").await.unwrap();
+
+        store
+            .append_by_id(
+                &cwd,
+                &session.id,
+                SessionEntry::ChildSessionLink {
+                    id: "link-1".to_string(),
+                    parent_session_id: session.id.clone(),
+                    child_session_id: "child-1".to_string(),
+                    timestamp: 1000,
+                    agent: "review".to_string(),
+                    prompt: "inspect changes".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let loaded = store.load(&cwd, &session.id).await.unwrap();
+        assert_eq!(loaded.entries.len(), 2);
     }
 
     #[tokio::test]

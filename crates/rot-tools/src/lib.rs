@@ -9,4 +9,6 @@ pub mod traits;
 pub use builtin::register_all;
 pub use error::ToolError;
 pub use registry::ToolRegistry;
-pub use traits::{SandboxMode, Tool, ToolContext, ToolResult};
+pub use traits::{
+    SandboxMode, TaskExecution, TaskRequest, TaskRunner, Tool, ToolContext, ToolResult,
+};

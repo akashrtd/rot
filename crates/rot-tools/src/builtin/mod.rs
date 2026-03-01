@@ -5,6 +5,7 @@ pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod read;
+pub mod task;
 pub mod webfetch;
 pub mod write;
 
@@ -19,5 +20,6 @@ pub fn register_all(registry: &mut ToolRegistry) {
     registry.register(Arc::new(bash::BashTool));
     registry.register(Arc::new(glob::GlobTool));
     registry.register(Arc::new(grep::GrepTool));
+    registry.register(Arc::new(task::TaskTool));
     registry.register(Arc::new(webfetch::WebFetchTool));
 }

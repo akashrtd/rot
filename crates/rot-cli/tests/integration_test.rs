@@ -80,7 +80,12 @@ async fn test_agent_with_mock_provider() {
         ..Default::default()
     };
 
-    let agent = Agent::new(provider, tools, config, RuntimeSecurityConfig::default());
+    let agent = std::sync::Arc::new(Agent::new(
+        provider,
+        tools,
+        config,
+        RuntimeSecurityConfig::default(),
+    ));
     let mut messages: Vec<Message> = Vec::new();
 
     let response = agent.process(&mut messages, "hello").await;
@@ -109,7 +114,12 @@ async fn test_agent_with_tools_registered() {
     rot_tools::register_all(&mut tools);
 
     let config = AgentConfig::default();
-    let agent = Agent::new(provider, tools, config, RuntimeSecurityConfig::default());
+    let agent = std::sync::Arc::new(Agent::new(
+        provider,
+        tools,
+        config,
+        RuntimeSecurityConfig::default(),
+    ));
     let mut messages: Vec<Message> = Vec::new();
 
     let response = agent.process(&mut messages, "test with tools").await;
@@ -150,6 +160,7 @@ async fn test_tool_registry_has_all_builtin_tools() {
     assert!(names.contains(&"bash"), "Missing bash tool");
     assert!(names.contains(&"glob"), "Missing glob tool");
     assert!(names.contains(&"grep"), "Missing grep tool");
+    assert!(names.contains(&"task"), "Missing task tool");
     assert!(names.contains(&"webfetch"), "Missing webfetch tool");
 }
 

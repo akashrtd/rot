@@ -364,7 +364,7 @@ impl App {
                     let mut config = config_store.load();
 
                     let has_key = config.api_keys.get(provider).map(|s| !s.is_empty()).unwrap_or(false)
-                        || std::env::var(&format!("{}_API_KEY", provider.to_uppercase())).is_ok();
+                        || std::env::var(format!("{}_API_KEY", provider.to_uppercase())).is_ok();
 
                     if has_key {
                         config.provider = provider.to_string();

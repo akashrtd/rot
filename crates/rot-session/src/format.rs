@@ -17,6 +17,12 @@ pub enum SessionEntry {
         cwd: String,
         model: String,
         provider: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<String>,
     },
 
     /// A chat message (user, assistant, or system).
@@ -48,6 +54,17 @@ pub enum SessionEntry {
         timestamp: u64,
         output: String,
         is_error: bool,
+    },
+
+    /// Link from a parent session to a delegated child session.
+    #[serde(rename = "child_session_link")]
+    ChildSessionLink {
+        id: String,
+        parent_session_id: String,
+        child_session_id: String,
+        timestamp: u64,
+        agent: String,
+        prompt: String,
     },
 
     /// A compaction marker indicating earlier messages were summarized.
@@ -99,6 +116,7 @@ pub fn entry_id(entry: &SessionEntry) -> &str {
         SessionEntry::Message { id, .. } => id,
         SessionEntry::ToolCall { id, .. } => id,
         SessionEntry::ToolResult { id, .. } => id,
+        SessionEntry::ChildSessionLink { id, .. } => id,
         SessionEntry::Compaction { id, .. } => id,
         SessionEntry::Branch { id, .. } => id,
     }
@@ -111,6 +129,7 @@ pub fn entry_timestamp(entry: &SessionEntry) -> u64 {
         SessionEntry::Message { timestamp, .. } => *timestamp,
         SessionEntry::ToolCall { timestamp, .. } => *timestamp,
         SessionEntry::ToolResult { timestamp, .. } => *timestamp,
+        SessionEntry::ChildSessionLink { timestamp, .. } => *timestamp,
         SessionEntry::Compaction { timestamp, .. } => *timestamp,
         SessionEntry::Branch { timestamp, .. } => *timestamp,
     }
@@ -128,6 +147,9 @@ mod tests {
             cwd: "/home/user/project".to_string(),
             model: "claude-sonnet-4-20250514".to_string(),
             provider: "anthropic".to_string(),
+            parent_session_id: None,
+            parent_tool_call_id: None,
+            agent: None,
         };
 
         let json = serde_json::to_string(&entry).unwrap();
@@ -186,6 +208,24 @@ mod tests {
     }
 
     #[test]
+    fn test_child_session_link_entry() {
+        let entry = SessionEntry::ChildSessionLink {
+            id: "link_1".to_string(),
+            parent_session_id: "parent_1".to_string(),
+            child_session_id: "child_1".to_string(),
+            timestamp: 1234567893,
+            agent: "review".to_string(),
+            prompt: "inspect changes".to_string(),
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"type\":\"child_session_link\""));
+
+        let deserialized: SessionEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry_id(&deserialized), "link_1");
+    }
+
+    #[test]
     fn test_compaction_entry() {
         let entry = SessionEntry::Compaction {
             id: "comp_1".to_string(),
@@ -225,6 +265,9 @@ mod tests {
             cwd: "/".to_string(),
             model: "test".to_string(),
             provider: "test".to_string(),
+            parent_session_id: None,
+            parent_tool_call_id: None,
+            agent: None,
         };
         assert_eq!(entry_timestamp(&entry), 999);
     }
@@ -232,13 +275,16 @@ mod tests {
     #[test]
     fn test_jsonl_roundtrip() {
         // Simulate a JSONL file with multiple entries
-        let entries = vec![
+        let entries = [
             SessionEntry::SessionStart {
                 id: "s1".to_string(),
                 timestamp: 1000,
                 cwd: "/project".to_string(),
                 model: "claude".to_string(),
                 provider: "anthropic".to_string(),
+                parent_session_id: None,
+                parent_tool_call_id: None,
+                agent: None,
             },
             SessionEntry::Message {
                 id: "m1".to_string(),

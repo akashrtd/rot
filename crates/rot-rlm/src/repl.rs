@@ -23,6 +23,12 @@ pub struct ReplEnv {
     stderr: Option<BufReader<ChildStderr>>,
 }
 
+impl Default for ReplEnv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReplEnv {
     pub fn new() -> Self {
         let temp_dir = std::env::temp_dir().join(format!("rot-repl-{}", ulid::Ulid::new()));
@@ -174,8 +180,8 @@ SHOW_VARS() {{
 
     fn extract_variables(&mut self, output: &str) {
         for line in output.lines() {
-            if line.starts_with("VAR_SET:") {
-                let parts: Vec<&str> = line[8..].splitn(2, ':').collect();
+            if let Some(rest) = line.strip_prefix("VAR_SET:") {
+                let parts: Vec<&str> = rest.splitn(2, ':').collect();
                 if parts.len() == 2 {
                     self.variables.insert(parts[0].to_string(), parts[1].to_string());
                 }

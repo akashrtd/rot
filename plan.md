@@ -1611,6 +1611,780 @@ All ─────────────────────────�
 
 ---
 
+## V2 Roadmap
+
+### V2 Goal
+
+Build the next version of `rot` as a safe, scriptable multi-agent CLI platform.
+
+The V2 target is not to copy OpenCode feature-for-feature. The goal is to close the largest workflow gaps while preserving `rot`'s strongest advantages:
+
+- OS sandboxing and approval policy
+- deterministic headless automation
+- structured `exec` outputs
+- smaller, auditable core
+
+### OpenCode Comparison Summary
+
+Reference product: [OpenCode](https://github.com/anomalyco/opencode), scoped to CLI capabilities only.
+
+OpenCode is currently ahead in:
+
+- agent system and subagents
+- delegated task execution
+- custom tools and MCP
+- provider breadth
+- built-in tool breadth
+- session/runtime operations (`run`, `serve`, exports, stats)
+
+`rot` is currently ahead in:
+
+- OS-level sandboxing
+- approval model clarity
+- structured automation contracts (`--json`, `--final-json`)
+- output schema validation
+
+### V2 Product Positioning
+
+Position `rot` V2 as:
+
+> the safe, scriptable coding agent with real multi-agent orchestration
+
+Do not position it as:
+
+> OpenCode but in Rust
+
+### V2 Priority Order
+
+1. Subagents and delegated task execution
+2. MCP and custom tools
+3. Missing high-value tools (`question`, `todo*`, `list`, `patch`, `websearch`)
+4. Provider expansion
+5. Session/runtime platform features
+6. Swarm orchestration
+
+---
+
+## Phase 10: Agent Platform
+
+### T10.1: Agent Registry
+
+#### Goal
+
+Introduce a first-class agent model for primary agents and subagents.
+
+#### Files to Create/Modify
+
+- `crates/rot-core/src/agent_registry.rs`
+- `crates/rot-core/src/agent_profile.rs`
+- `crates/rot-core/src/lib.rs`
+- `crates/rot-cli/src/cli.rs`
+- `crates/rot-tui/src/app.rs`
+
+#### Scope
+
+- `AgentSpec`
+- `AgentMode { Primary, Subagent }`
+- per-agent prompt override
+- per-agent model override
+- per-agent tool allow/deny rules
+- per-agent sandbox/approval inheritance rules
+
+#### Acceptance Criteria
+
+- [ ] `rot exec --agent <name>` works
+- [ ] TUI can switch/select agents
+- [ ] default built-in agents exist: `build`, `plan`, `explore`, `review`
+- [ ] agent config is serializable and test-covered
+
+### T10.2: Task Tool and Child Sessions
+
+#### Goal
+
+Add delegated execution through a first-class `task` tool.
+
+#### Files to Create/Modify
+
+- `crates/rot-tools/src/builtin/task.rs`
+- `crates/rot-tools/src/builtin/mod.rs`
+- `crates/rot-core/src/agent.rs`
+- `crates/rot-session/src/store.rs`
+- `crates/rot-cli/src/commands/exec.rs`
+
+#### Scope
+
+- `task` tool arguments:
+  - `agent`
+  - `prompt`
+  - `cwd`
+  - `context`
+  - `sandbox`
+  - `approval`
+  - `model`
+- child session persistence
+- parent-child session linkage
+- delegated result return format
+
+#### Acceptance Criteria
+
+- [ ] parent agent can delegate one subtask and consume the result
+- [ ] child sessions are stored and linked
+- [ ] task execution is traceable in session history
+- [ ] delegated task respects inherited policy by default
+
+### T10.3: Parallel Delegation
+
+#### Goal
+
+Allow bounded parallel task execution.
+
+#### Files to Create/Modify
+
+- `crates/rot-core/src/task_scheduler.rs`
+- `crates/rot-core/src/agent.rs`
+- `crates/rot-tools/src/builtin/task.rs`
+
+#### Scope
+
+- max concurrent subagents
+- max delegation depth
+- per-subagent timeout
+- per-subagent token budget
+- fan-out / fan-in merge behavior
+
+#### Acceptance Criteria
+
+- [ ] one parent can launch multiple subagents concurrently
+- [ ] concurrency is bounded and configurable
+- [ ] partial failures are surfaced clearly
+- [ ] no unbounded recursive spawning
+
+---
+
+## Phase 11: Extensibility
+
+### T11.1: MCP Client
+
+#### Goal
+
+Support external tools via MCP.
+
+#### Files to Create/Modify
+
+- `crates/rot-mcp/`
+- `crates/rot-core/src/config.rs`
+- `crates/rot-tools/src/registry.rs`
+- `crates/rot-cli/Cargo.toml`
+
+#### Scope
+
+- MCP server definitions in config
+- startup discovery and registration
+- tool namespacing
+- approval/sandbox application to MCP tools
+
+#### Acceptance Criteria
+
+- [ ] MCP tools can be loaded from config
+- [ ] MCP tool calls appear in the same transcript/audit flow
+- [ ] policy gating works for MCP tools
+
+### T11.2: Custom Tools
+
+#### Goal
+
+Support user-defined tools without recompiling `rot`.
+
+#### Files to Create/Modify
+
+- `crates/rot-tools/src/custom.rs`
+- `crates/rot-core/src/config.rs`
+- `docs/configuration.md`
+
+#### Scope
+
+- config-defined tools
+- command-backed tools
+- schema definition for parameters
+- namespace and collision rules
+
+#### Acceptance Criteria
+
+- [ ] custom tools can be loaded from config
+- [ ] custom tools appear in provider tool definitions
+- [ ] errors and metadata are normalized into `ToolResult`
+
+---
+
+## Phase 12: Tool Surface Expansion
+
+### T12.1: Planning and Interaction Tools
+
+#### Goal
+
+Add the highest-value missing CLI tools compared with OpenCode.
+
+#### Files to Create/Modify
+
+- `crates/rot-tools/src/builtin/question.rs`
+- `crates/rot-tools/src/builtin/todoread.rs`
+- `crates/rot-tools/src/builtin/todowrite.rs`
+- `crates/rot-tools/src/builtin/list.rs`
+- `crates/rot-tools/src/builtin/patch.rs`
+- `crates/rot-tools/src/builtin/websearch.rs`
+
+#### Acceptance Criteria
+
+- [ ] `question` supports interactive clarification in TUI
+- [ ] `todo*` tools maintain structured task state
+- [ ] `list` provides directory listing without shelling out
+- [ ] `patch` supports deterministic file patch application
+- [ ] `websearch` is gated by network policy
+
+### T12.2: Experimental Code Intelligence
+
+#### Goal
+
+Add richer code-aware tools where they improve reliability.
+
+#### Files to Create/Modify
+
+- `crates/rot-tools/src/builtin/lsp.rs`
+- `crates/rot-tools/src/builtin/codesearch.rs`
+
+#### Acceptance Criteria
+
+- [ ] LSP tool is explicitly marked experimental
+- [ ] graceful fallback exists when no language server is available
+
+---
+
+## Phase 13: Provider Expansion
+
+### T13.1: Additional Providers
+
+#### Goal
+
+Match a broader range of practical deployment environments.
+
+#### Files to Create/Modify
+
+- `crates/rot-provider/src/providers/ollama.rs`
+- `crates/rot-provider/src/providers/openrouter.rs`
+- `crates/rot-provider/src/providers/google.rs`
+- `crates/rot-provider/src/providers/mod.rs`
+
+#### Acceptance Criteria
+
+- [ ] Ollama works for local models
+- [ ] OpenRouter works with model selection
+- [ ] Google provider supports streaming and tool use where available
+- [ ] provider tests exist for request shaping and stream parsing
+
+### T13.2: Provider Registry UX
+
+#### Goal
+
+Improve provider and model management from the CLI.
+
+#### Files to Create/Modify
+
+- `crates/rot-cli/src/cli.rs`
+- `crates/rot-cli/src/commands/providers.rs`
+- `crates/rot-cli/src/commands/models.rs`
+
+#### Acceptance Criteria
+
+- [ ] `rot providers` lists configured/available providers
+- [ ] `rot models` lists models for the active provider
+- [ ] provider configuration is discoverable from CLI help
+
+---
+
+## Phase 14: Session and Runtime Platform
+
+### T14.1: Session Operations
+
+#### Goal
+
+Expand headless/session workflows for CLI usage.
+
+#### Files to Create/Modify
+
+- `crates/rot-cli/src/commands/session.rs`
+- `crates/rot-session/src/store.rs`
+
+#### Scope
+
+- export
+- import
+- continue
+- fork
+- stats
+
+#### Acceptance Criteria
+
+- [ ] session export/import are round-trip tested
+- [ ] `rot exec --session <id>` resumes prior state
+- [ ] `rot exec --fork` creates a new branch from an existing session
+
+### T14.2: Headless Service Mode
+
+#### Goal
+
+Expose `rot` as a service for automation and embedding.
+
+#### Files to Create/Modify
+
+- `crates/rot-serve/`
+- `crates/rot-cli/src/cli.rs`
+
+#### Acceptance Criteria
+
+- [ ] `rot serve` exposes a documented local API
+- [ ] API supports exec-style calls with the same security model
+- [ ] structured outputs match CLI contracts where possible
+
+---
+
+## Phase 15: Swarm Orchestration
+
+### T15.1: Orchestrated Worker Model
+
+#### Goal
+
+Add safe, bounded swarm-style orchestration on top of subagents.
+
+#### Files to Create/Modify
+
+- `crates/rot-core/src/swarm.rs`
+- `crates/rot-core/src/task_scheduler.rs`
+- `crates/rot-tools/src/builtin/task.rs`
+
+#### Scope
+
+- one orchestrator agent
+- multiple worker agents
+- explicit fan-out/fan-in
+- merge policy
+- cancellation
+- structured worker outputs
+
+#### Acceptance Criteria
+
+- [ ] planner -> worker -> merge workflow exists
+- [ ] orchestration is bounded by concurrency and depth
+- [ ] worker outputs are structured and auditable
+- [ ] swarm is disabled by default unless explicitly enabled
+
+---
+
+## V2 Milestones
+
+| Milestone | Scope |
+| --------- | ----- |
+| V2.1 | Agent registry, `task` tool, child sessions, `question`, `todo*` |
+| V2.2 | MCP client, custom tools, `list`, `patch`, `websearch` |
+| V2.3 | Ollama, OpenRouter, Google, provider/model CLI, experimental LSP |
+| V2.4 | Session export/import/fork/continue/stats, `serve`, bounded swarm orchestration |
+
+---
+
+## V2 RLM Plan
+
+### RLM Design Goals
+
+Bring `rot-rlm` closer to the actual Recursive Language Models pattern instead of keeping it as a shell loop with manual prompt retries.
+
+V2 RLM should:
+
+- handle real-world contexts safely, including PDFs and other non-plain-text inputs
+- expose a programmable environment that supports analysis, transformation, and recursion
+- support explicit structured subcalls instead of string-marker hacks
+- preserve full trajectories for debugging and evaluation
+- enforce the same safety model as the rest of `rot`
+
+### Current RLM Gaps
+
+Current implementation references:
+
+- `crates/rot-rlm/src/engine.rs`
+- `crates/rot-rlm/src/repl.rs`
+
+Known gaps:
+
+- raw binary context can fail with invalid UTF-8
+- shell REPL is too weak for structured context manipulation
+- recursive subcalls are simulated with `LLM_QUERY` string markers
+- no `FINAL_VAR(...)` support
+- no structured trajectory persistence
+- no subcall budgets or usage accounting
+- no isolated execution modes for RLM environments
+
+### RLM Priority Order
+
+1. Context ingestion and validation
+2. Structured trajectory logging
+3. Python-first RLM environment
+4. Structured recursive subcalls
+5. `FINAL_VAR(...)` and structured finalizers
+6. Isolated environments and budgeting
+
+---
+
+## Phase 16: RLM Context Ingestion
+
+### T16.1: Context Preflight and MIME Detection
+
+#### Goal
+
+Reject unsupported binary contexts early and provide deterministic preprocessing paths.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/context_loader.rs`
+- `crates/rot-rlm/src/lib.rs`
+- `crates/rot-cli/src/commands/exec.rs`
+
+#### Scope
+
+- detect text vs binary inputs
+- infer MIME/type from extension and content sniffing
+- emit clear errors for unsupported context types
+- normalize context metadata for downstream use
+
+#### Acceptance Criteria
+
+- [ ] raw binary files fail with a clear error instead of UTF-8 stream errors
+- [ ] text files load without behavior regression
+- [ ] context metadata includes source path, detected type, and extracted length
+
+### T16.2: Built-in Context Extractors
+
+#### Goal
+
+Add automatic preprocessing for common context types.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/context_loader.rs`
+- `docs/tools.md`
+- `docs/getting-started.md`
+
+#### Scope
+
+- PDF to text via `pdftotext` when available
+- HTML to text
+- JSON pretty/structured loading
+- CSV tabular loading
+
+#### Acceptance Criteria
+
+- [ ] PDF context works when `pdftotext` is installed
+- [ ] extractor failure falls back to a clear actionable error
+- [ ] extracted context is cached in a temporary managed artifact
+
+---
+
+## Phase 17: Python RLM Runtime
+
+### T17.1: Python REPL Environment
+
+#### Goal
+
+Replace bash-first execution with a Python-first analysis environment.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/python_repl.rs`
+- `crates/rot-rlm/src/repl.rs`
+- `crates/rot-rlm/src/lib.rs`
+
+#### Scope
+
+- Python subprocess runner
+- in-memory `context` object
+- helper functions:
+  - `context_preview()`
+  - `context_length()`
+  - `context_slice(start, end)`
+  - `context_find(pattern)`
+  - `context_chunks(size, overlap)`
+  - `FINAL(text)`
+  - `FINAL_VAR(name)`
+
+#### Acceptance Criteria
+
+- [ ] Python REPL can preserve state across iterations
+- [ ] large text contexts can be sliced without shelling out
+- [ ] `FINAL_VAR(name)` returns environment data as the final answer
+
+### T17.2: Runtime Selection
+
+#### Goal
+
+Support multiple RLM runtime backends while keeping Python as the default.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/runtime.rs`
+- `crates/rot-cli/src/cli.rs`
+
+#### Scope
+
+- `RlmRuntimeKind { Python, Bash }`
+- `--rlm-runtime <python|bash>`
+- preserve bash as fallback during migration
+
+#### Acceptance Criteria
+
+- [ ] Python is the default runtime
+- [ ] bash runtime remains available behind a flag
+- [ ] runtime-specific tests exist for both backends
+
+---
+
+## Phase 18: Recursive Subcalls
+
+### T18.1: Structured Subcall Primitive
+
+#### Goal
+
+Replace string-tagged `LLM_QUERY` behavior with explicit subcall APIs.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/subcall.rs`
+- `crates/rot-rlm/src/engine.rs`
+- `crates/rot-rlm/src/python_repl.rs`
+
+#### Scope
+
+- environment helper:
+  - `SUBLM(query, text_or_var)`
+- typed subcall result
+- isolated subcall history
+- optional smaller model routing
+
+#### Acceptance Criteria
+
+- [ ] subcalls are structured, not regex-rewritten strings
+- [ ] subcall outputs are logged separately
+- [ ] subcalls can target explicit text slices or named variables
+
+### T18.2: Recursive Depth and Budgeting
+
+#### Goal
+
+Make recursion safe and deterministic.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/config.rs`
+- `crates/rot-rlm/src/engine.rs`
+
+#### Scope
+
+- max recursion depth
+- max subcalls
+- per-subcall timeout
+- token/cost budget tracking
+- optional subcall provider/model override
+
+#### Acceptance Criteria
+
+- [ ] recursion depth is capped
+- [ ] subcall count is capped
+- [ ] budget violations fail with explicit errors
+
+---
+
+## Phase 19: RLM Observability
+
+### T19.1: Trajectory Logging
+
+#### Goal
+
+Persist a structured trace of each RLM run.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/trace.rs`
+- `crates/rot-session/src/store.rs`
+- `crates/rot-cli/src/commands/exec.rs`
+
+#### Scope
+
+- iteration-by-iteration logs
+- emitted code
+- runtime stdout/stderr
+- subcalls
+- timing
+- truncation markers
+- finalizer path
+
+#### Acceptance Criteria
+
+- [ ] every RLM run emits a machine-readable trajectory artifact
+- [ ] trajectory can be linked from session metadata
+- [ ] failures preserve the partial trace
+
+### T19.2: Usage and Cost Accounting
+
+#### Goal
+
+Return meaningful usage numbers for `exec --rlm`.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/usage.rs`
+- `crates/rot-cli/src/commands/exec.rs`
+
+#### Acceptance Criteria
+
+- [ ] `exec --rlm --json` includes non-zero usage when available
+- [ ] subcall usage is aggregated into total usage
+- [ ] usage reporting is tested for success and partial-failure paths
+
+---
+
+## Phase 20: RLM Isolation and Safety
+
+### T20.1: Sandboxed RLM Environments
+
+#### Goal
+
+Run the RLM runtime with explicit isolation modes instead of always using a local unrestricted subprocess.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/runtime_local.rs`
+- `crates/rot-rlm/src/runtime_docker.rs`
+- `crates/rot-rlm/src/runtime.rs`
+- `crates/rot-sandbox/`
+
+#### Scope
+
+- `local` runtime
+- `docker` runtime
+- security policy inheritance from `RuntimeSecurityConfig`
+
+#### Acceptance Criteria
+
+- [ ] local runtime respects sandbox policy where feasible
+- [ ] docker runtime can execute isolated RLM jobs
+- [ ] runtime failures are surfaced clearly in CLI output
+
+### T20.2: Safe Defaults
+
+#### Goal
+
+Prevent RLM from bypassing the rest of the system’s security model.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/engine.rs`
+- `crates/rot-core/src/security.rs`
+
+#### Acceptance Criteria
+
+- [ ] RLM runtime inherits sandbox/approval defaults from the parent command
+- [ ] dangerous RLM execution requires explicit opt-in
+- [ ] networked extractors/runtime behavior is gated by policy
+
+---
+
+## Phase 21: RLM Test Strategy
+
+### T21.1: Engine-Level Unit Tests
+
+#### Goal
+
+Move beyond REPL-only tests and validate the actual RLM control flow.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/src/engine_tests.rs`
+- `crates/rot-rlm/src/lib.rs`
+
+#### Test Matrix
+
+- root step emits code -> runtime executes -> engine finalizes
+- no code emitted -> retry path
+- `FINAL(text)` success path
+- `FINAL_VAR(name)` success path
+- recursive subcall success path
+- recursion budget exceeded
+- timeout exceeded
+- truncation behavior
+
+#### Acceptance Criteria
+
+- [ ] all core engine branches are covered by unit tests
+- [ ] fake/mock agent can drive engine tests without network
+
+### T21.2: Context Ingestion Integration Tests
+
+#### Goal
+
+Test realistic context types and preprocessing.
+
+#### Files to Create/Modify
+
+- `crates/rot-rlm/tests/context_ingestion.rs`
+- `tests/fixtures/`
+
+#### Test Matrix
+
+- plain text context
+- binary file rejection
+- PDF preprocessing success
+- extractor unavailable path
+- malformed JSON/CSV fallback behavior
+
+#### Acceptance Criteria
+
+- [ ] direct PDF context is covered by tests
+- [ ] invalid UTF-8 regression is permanently prevented
+
+### T21.3: End-to-End CLI Tests
+
+#### Goal
+
+Validate `rot exec --rlm` from the real CLI boundary.
+
+#### Files to Create/Modify
+
+- `crates/rot-cli/tests/rlm_exec_test.rs`
+
+#### Test Matrix
+
+- `rot exec --rlm --context <txt>`
+- `rot exec --rlm --context <pdf>`
+- `--json`
+- `--final-json`
+- `--output-schema`
+- failure exit code behavior
+
+#### Acceptance Criteria
+
+- [ ] `exec --rlm` is tested with structured output modes
+- [ ] schema validation works on RLM outputs
+- [ ] end-to-end tests do not require live provider credentials by default
+
+---
+
+## RLM Milestones
+
+| Milestone | Scope |
+| --------- | ----- |
+| RLM V2.1 | Context preflight, PDF extraction, binary rejection, trajectory logging |
+| RLM V2.2 | Python REPL runtime, `FINAL_VAR`, runtime selection |
+| RLM V2.3 | Structured subcalls, recursion limits, usage accounting |
+| RLM V2.4 | Sandboxed local/docker runtimes, full CLI e2e coverage |
+
+---
+
 ## Document History
 
 | Version | Date       | Changes                                                                                                          |
@@ -1618,3 +2392,5 @@ All ─────────────────────────�
 | 1.0     | 2026-02-25 | Initial plan created                                                                                             |
 | 1.1     | 2026-02-25 | Fixed: T0.3 error types, T3.6 dependency, missing T2.4/T2.5 providers, workspace deps, MVP scope, layout diagram |
 | 1.2     | 2026-02-25 | Normalized roadmap: MVP provider scope, RLM phases, permission timing, and `rot-cli` binary scaffolding          |
+| 1.3     | 2026-02-28 | Added V2 roadmap: OpenCode comparison summary, agent platform phases, extensibility, provider expansion, and swarm milestones |
+| 1.4     | 2026-02-28 | Added dedicated RLM V2 plan: context ingestion, Python runtime, structured subcalls, observability, isolation, and test strategy |

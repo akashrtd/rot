@@ -102,6 +102,7 @@ mod tests {
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "write"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "edit"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "bash"));
+        assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "task"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "webfetch"));
     }
 
@@ -113,12 +114,13 @@ mod tests {
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "write"));
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "edit"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "bash"));
+        assert!(!is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "task"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "webfetch"));
     }
 
     #[test]
     fn test_never_policy_matrix() {
-        for tool in ["read", "grep", "glob", "write", "edit", "bash", "webfetch"] {
+        for tool in ["read", "grep", "glob", "write", "edit", "bash", "task", "webfetch"] {
             assert!(is_auto_allowed_by_policy(ApprovalPolicy::Never, tool));
         }
     }

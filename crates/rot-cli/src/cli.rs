@@ -45,6 +45,10 @@ pub struct Cli {
     #[arg(long, default_value = "anthropic", global = true)]
     pub provider: String,
 
+    /// Built-in agent profile to use.
+    #[arg(long, global = true)]
+    pub agent: Option<String>,
+
     /// Model to use (defaults to provider's default model).
     #[arg(long, global = true)]
     pub model: Option<String>,
@@ -271,6 +275,12 @@ mod tests {
         .unwrap();
         let cfg = Config::default();
         assert!(parsed.resolve_runtime_security_for_exec(&cfg).is_err());
+    }
+
+    #[test]
+    fn test_global_agent_flag_parses() {
+        let parsed = Cli::try_parse_from(["rot", "--agent", "plan", "exec", "hello"]).unwrap();
+        assert_eq!(parsed.agent.as_deref(), Some("plan"));
     }
 }
 

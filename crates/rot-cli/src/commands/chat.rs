@@ -1,3 +1,4 @@
+use rot_core::AgentRegistry;
 use rot_provider::{AnthropicProvider, Provider, new_openai_provider, new_zai_provider};
 use rot_session::SessionStore;
 use rot_tools::ToolRegistry;
@@ -6,10 +7,17 @@ use rot_tools::ToolRegistry;
 pub async fn run(
     model: Option<&str>,
     provider_name: &str,
+    agent_name: Option<&str>,
     runtime_security: rot_core::RuntimeSecurityConfig,
 ) -> anyhow::Result<()> {
     let mut tools = ToolRegistry::new();
     rot_tools::register_all(&mut tools);
+    let agent_profile = AgentRegistry::resolve(agent_name)?;
+    let system_prompt = if agent_profile.name == "default" {
+        AgentRegistry::default_chat_system_prompt().to_string()
+    } else {
+        agent_profile.system_prompt.to_string()
+    };
 
     let config_store = rot_core::config::ConfigStore::new();
     config_store.hydrate_env();
@@ -34,6 +42,8 @@ pub async fn run(
         session_store,
         &model_name,
         provider_name,
+        agent_profile.name,
+        system_prompt,
         runtime_security,
     )
         .await

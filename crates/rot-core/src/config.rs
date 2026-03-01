@@ -1,4 +1,5 @@
 use crate::security::{ApprovalPolicy, SandboxMode};
+use rot_tools::{CustomToolConfig, McpServerConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -11,6 +12,8 @@ pub struct Config {
     pub provider: String,
     pub model: String,
     pub api_keys: HashMap<String, String>,
+    pub custom_tools: Vec<CustomToolConfig>,
+    pub mcp_servers: Vec<McpServerConfig>,
     pub approval_policy: ApprovalPolicy,
     pub sandbox_mode: SandboxMode,
     pub sandbox_network_access: bool,
@@ -22,6 +25,8 @@ impl Default for Config {
             provider: "anthropic".to_string(),
             model: "claude-3-5-sonnet-latest".to_string(),
             api_keys: HashMap::new(),
+            custom_tools: Vec::new(),
+            mcp_servers: Vec::new(),
             approval_policy: ApprovalPolicy::OnRequest,
             sandbox_mode: SandboxMode::WorkspaceWrite,
             sandbox_network_access: false,
@@ -85,6 +90,7 @@ impl ConfigStore {
 mod tests {
     use super::Config;
     use crate::security::{ApprovalPolicy, SandboxMode};
+    use rot_tools::{CustomToolConfig, McpServerConfig};
 
     #[test]
     fn test_config_backward_compatible_defaults() {
@@ -95,6 +101,8 @@ mod tests {
         }"#;
 
         let parsed: Config = serde_json::from_str(legacy).unwrap();
+        assert!(parsed.custom_tools.is_empty());
+        assert!(parsed.mcp_servers.is_empty());
         assert_eq!(parsed.approval_policy, ApprovalPolicy::OnRequest);
         assert_eq!(parsed.sandbox_mode, SandboxMode::WorkspaceWrite);
         assert!(!parsed.sandbox_network_access);
@@ -106,6 +114,23 @@ mod tests {
             provider: "openai".to_string(),
             model: "gpt-4o".to_string(),
             api_keys: Default::default(),
+            custom_tools: vec![CustomToolConfig {
+                name: "echo_args".to_string(),
+                description: "Echo args".to_string(),
+                command: "cat \"$ROT_TOOL_ARGS_FILE\"".to_string(),
+                parameters_schema: serde_json::json!({"type":"object"}),
+                timeout_secs: Some(30),
+            }],
+            mcp_servers: vec![McpServerConfig {
+                name: "filesystem".to_string(),
+                enabled: true,
+                command: "npx".to_string(),
+                args: vec!["-y".to_string(), "@modelcontextprotocol/server-filesystem".to_string()],
+                cwd: Some(".".to_string()),
+                env: Default::default(),
+                startup_timeout_secs: 20,
+                tool_timeout_secs: 60,
+            }],
             approval_policy: ApprovalPolicy::Never,
             sandbox_mode: SandboxMode::DangerFullAccess,
             sandbox_network_access: true,
@@ -113,6 +138,8 @@ mod tests {
 
         let json = serde_json::to_string(&cfg).unwrap();
         let parsed: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.custom_tools.len(), 1);
+        assert_eq!(parsed.mcp_servers.len(), 1);
         assert_eq!(parsed.approval_policy, ApprovalPolicy::Never);
         assert_eq!(parsed.sandbox_mode, SandboxMode::DangerFullAccess);
         assert!(parsed.sandbox_network_access);

@@ -1,83 +1,105 @@
-# Built-in Tools
+# Tools
 
-rot includes 7 built-in tools that the AI can invoke during conversations.
+rot includes 8 built-in tools and can also load external tools from config.
 
 ## read
 
 Read file contents with optional offset and limit.
 
-**Parameters:**
 | Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `path` | string | ✅ | File path (relative to working dir) |
-| `offset` | integer | | Start line (0-indexed) |
-| `limit` | integer | | Max lines to read |
+| --- | --- | --- | --- |
+| `path` | string | Yes | File path relative to the working directory |
+| `offset` | integer | No | Start line, zero-indexed |
+| `limit` | integer | No | Maximum lines to read |
 
 ## write
 
-Create or overwrite a file. Creates parent directories automatically.
+Create or overwrite a file. Parent directories are created automatically.
 
-**Parameters:**
 | Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `path` | string | ✅ | File path |
-| `content` | string | ✅ | File contents to write |
+| --- | --- | --- | --- |
+| `path` | string | Yes | File path |
+| `content` | string | Yes | File contents to write |
 
 ## edit
 
-Perform surgical string replacement in a file.
+Perform exact string replacement in a file.
 
-**Parameters:**
 | Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `path` | string | ✅ | File path |
-| `old` | string | ✅ | String to find |
-| `new` | string | ✅ | Replacement string |
-| `replace_all` | boolean | | Replace all occurrences (default: false) |
+| --- | --- | --- | --- |
+| `path` | string | Yes | File path |
+| `old` | string | Yes | String to find |
+| `new` | string | Yes | Replacement string |
+| `replace_all` | boolean | No | Replace all occurrences, default `false` |
 
 ## bash
 
 Execute a shell command.
 
-**Parameters:**
 | Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `command` | string | ✅ | Shell command to run |
-| `timeout` | integer | | Timeout in seconds (default: 30) |
+| --- | --- | --- | --- |
+| `command` | string | Yes | Shell command to run |
+| `timeout` | integer | No | Timeout in seconds, default `30` |
 
-**Limits:** Output truncated to 50KB. Commands run in the working directory.
+Output is truncated to 50 KB.
 
 ## glob
 
 Find files matching a glob pattern. Respects `.gitignore`.
 
-**Parameters:**
 | Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `pattern` | string | ✅ | Glob pattern (e.g., `**/*.rs`) |
+| --- | --- | --- | --- |
+| `pattern` | string | Yes | Glob pattern such as `**/*.rs` |
 
-**Limits:** Max 1000 results.
+Results are limited to 1000 paths.
 
 ## grep
 
-Search file contents with regex patterns. Respects `.gitignore`.
+Search file contents with a regex pattern. Respects `.gitignore`.
 
-**Parameters:**
 | Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `pattern` | string | ✅ | Regex pattern |
-| `include` | string | | Glob filter for files (e.g., `*.rs`) |
-| `context` | integer | | Context lines around matches (default: 0) |
+| --- | --- | --- | --- |
+| `pattern` | string | Yes | Regex pattern |
+| `include` | string | No | File glob filter such as `*.rs` |
+| `context` | integer | No | Context lines around each match |
 
-**Limits:** Max 200 matches.
+Results are limited to 200 matches.
+
+## task
+
+Delegate work to a built-in subagent.
+
+| Param | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agent` | string | Yes | Built-in subagent name |
+| `prompt` | string | Yes | Task prompt for the subagent |
+
+Delegation is bounded by depth, total-task, concurrency, and timeout limits.
 
 ## webfetch
 
 Fetch content from a URL.
 
-**Parameters:**
 | Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `url` | string | ✅ | URL to fetch |
+| --- | --- | --- | --- |
+| `url` | string | Yes | URL to fetch |
 
-**Limits:** Response body truncated to 100KB.
+Response bodies are truncated to 100 KB.
+
+## External Tools
+
+rot can also load:
+- `custom_tools`: config-defined shell commands
+- `mcp_servers`: tools discovered from stdio MCP servers
+
+External tools appear in the same tool transcript flow as built-ins.
+
+Naming:
+- custom tools use the configured tool name directly
+- MCP tools are exported as `mcp__<server>__<tool>`
+
+Inspection:
+- `rot tools` lists all loaded tools
+- `rot tools <name>` shows one tool schema
+- `/tools` lists loaded tools in the TUI
+- `/tool <name>` shows one tool schema in the TUI

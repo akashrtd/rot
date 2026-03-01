@@ -278,6 +278,7 @@ pub async fn run_tui(
                                     if let Some(selected) = app.selected_slash_command() {
                                         if handle_session_inspection_command(
                                             &mut app,
+                                            &tools,
                                             &session_store,
                                             &cwd,
                                             &session.id,
@@ -306,6 +307,7 @@ pub async fn run_tui(
 
                                 if handle_session_inspection_command(
                                     &mut app,
+                                    &tools,
                                     &session_store,
                                     &cwd,
                                     &session.id,
@@ -515,6 +517,7 @@ pub async fn run_tui(
 
 async fn handle_session_inspection_command(
     app: &mut App,
+    tools: &rot_tools::ToolRegistry,
     session_store: &rot_session::SessionStore,
     cwd: &std::path::Path,
     session_id: &str,
@@ -545,6 +548,11 @@ async fn handle_session_inspection_command(
         return true;
     }
 
+    if trimmed == "/tools" {
+        app.push_chat("system", &render_tools_summary(tools), ChatStyle::System);
+        return true;
+    }
+
     if let Some(child_id) = trimmed.strip_prefix("/child ").map(str::trim) {
         match render_child_session_detail(session_store, cwd, session_id, child_id).await {
             Ok(detail) => app.push_chat("system", &detail, ChatStyle::System),
@@ -557,7 +565,63 @@ async fn handle_session_inspection_command(
         return true;
     }
 
+    if let Some(tool_name) = trimmed.strip_prefix("/tool ").map(str::trim) {
+        match render_tool_detail(tools, tool_name) {
+            Ok(detail) => app.push_chat("system", &detail, ChatStyle::System),
+            Err(error) => app.push_chat("error", &error, ChatStyle::Error),
+        }
+        return true;
+    }
+
     false
+}
+
+fn render_tools_summary(tools: &rot_tools::ToolRegistry) -> String {
+    let mut names = tools.names();
+    names.sort();
+
+    let mut lines = vec![format!("Loaded tools ({})", names.len()), String::new()];
+    for name in names {
+        let description = tools
+            .get(&name)
+            .map(|tool| tool.description().to_string())
+            .unwrap_or_else(|| "unknown tool".to_string());
+        lines.push(format!("{name} [{}]", tool_kind(&name)));
+        lines.push(format!("  {}", truncate_line(&description, 88)));
+    }
+    lines.push(String::new());
+    lines.push("Use /tool <name> to inspect a tool schema.".to_string());
+    lines.join("\n")
+}
+
+fn render_tool_detail(tools: &rot_tools::ToolRegistry, name: &str) -> Result<String, String> {
+    let tool = tools
+        .get(name)
+        .ok_or_else(|| format!("Unknown tool: {name}"))?;
+    let schema = serde_json::to_string_pretty(&tool.parameters_schema())
+        .map_err(|e| format!("Failed to render schema: {e}"))?;
+
+    Ok(format!(
+        "Tool {}\n\nkind        {}\nlabel       {}\ndescription {}\nparameters\n{}",
+        tool.name(),
+        tool_kind(tool.name()),
+        tool.label(),
+        tool.description(),
+        schema
+    ))
+}
+
+fn tool_kind(name: &str) -> &'static str {
+    if name.starts_with("mcp__") {
+        "mcp"
+    } else if matches!(
+        name,
+        "read" | "write" | "edit" | "bash" | "glob" | "grep" | "task" | "webfetch"
+    ) {
+        "builtin"
+    } else {
+        "custom"
+    }
 }
 
 async fn render_child_sessions_summary(
@@ -873,6 +937,26 @@ fn agent_config(agent_name: &str, initial_system_prompt: Option<String>) -> Agen
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_render_tools_summary_includes_builtin_tool() {
+        let mut tools = rot_tools::ToolRegistry::new();
+        rot_tools::register_all(&mut tools);
+
+        let summary = render_tools_summary(&tools);
+        assert!(summary.contains("Loaded tools (8)"));
+        assert!(summary.contains("read [builtin]"));
+    }
+
+    #[test]
+    fn test_render_tool_detail_includes_schema() {
+        let mut tools = rot_tools::ToolRegistry::new();
+        rot_tools::register_all(&mut tools);
+
+        let detail = render_tool_detail(&tools, "read").unwrap();
+        assert!(detail.contains("Tool read"));
+        assert!(detail.contains("\"path\""));
+    }
 
     #[test]
     fn test_extract_text_from_content() {

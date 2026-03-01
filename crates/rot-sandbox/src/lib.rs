@@ -1,9 +1,11 @@
 //! OS sandbox abstraction for shell command execution.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tokio::process::Command;
+use std::process::Stdio;
 
 /// Filesystem sandbox mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +79,50 @@ pub async fn run_shell_command(
     }
 }
 
+/// Spawn a long-lived command under the requested sandbox policy with piped stdio.
+pub fn spawn_command(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &HashMap<String, String>,
+    policy: &SandboxPolicy,
+) -> Result<tokio::process::Child, SandboxError> {
+    let mut command = sandboxed_command(program, args, cwd, policy)?;
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    command
+        .spawn()
+        .map_err(|e| match policy.mode {
+            SandboxMode::DangerFullAccess => SandboxError::Execution(e.to_string()),
+            SandboxMode::ReadOnly | SandboxMode::WorkspaceWrite
+                if e.to_string().contains("No such file or directory") =>
+            {
+                if cfg!(target_os = "macos") {
+                    SandboxError::BackendUnavailable(
+                        "macOS sandbox backend (sandbox-exec) unavailable. Use --sandbox danger-full-access to proceed."
+                            .to_string(),
+                    )
+                } else if cfg!(target_os = "linux") {
+                    SandboxError::BackendUnavailable(
+                        "Linux sandbox backend (bubblewrap) unavailable. Use --sandbox danger-full-access to proceed."
+                            .to_string(),
+                    )
+                } else {
+                    SandboxError::BackendUnavailable(
+                        "Sandbox backend unavailable on this OS. Use --sandbox danger-full-access to proceed."
+                            .to_string(),
+                    )
+                }
+            }
+            _ => SandboxError::Execution(e.to_string()),
+        })
+}
+
 async fn run_direct(
     command: &str,
     cwd: &Path,
@@ -92,6 +138,33 @@ async fn run_direct(
         timeout,
     )
     .await
+}
+
+fn sandboxed_command(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    policy: &SandboxPolicy,
+) -> Result<Command, SandboxError> {
+    match policy.mode {
+        SandboxMode::DangerFullAccess => {
+            let mut cmd = Command::new(program);
+            cmd.args(args).current_dir(cwd);
+            Ok(cmd)
+        }
+        SandboxMode::ReadOnly | SandboxMode::WorkspaceWrite => {
+            if cfg!(target_os = "macos") {
+                sandboxed_command_macos(program, args, cwd, policy)
+            } else if cfg!(target_os = "linux") {
+                sandboxed_command_linux(program, args, cwd, policy)
+            } else {
+                Err(SandboxError::BackendUnavailable(
+                    "Sandbox backend unavailable on this OS. Use --sandbox danger-full-access to proceed."
+                        .to_string(),
+                ))
+            }
+        }
+    }
 }
 
 async fn run_macos(
@@ -129,6 +202,25 @@ async fn run_macos(
         }
         other => other,
     })
+}
+
+fn sandboxed_command_macos(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    policy: &SandboxPolicy,
+) -> Result<Command, SandboxError> {
+    let workspace = cwd
+        .canonicalize()
+        .map_err(|e| SandboxError::Execution(format!("Cannot resolve workspace: {e}")))?;
+    let profile = seatbelt_profile(&workspace, policy);
+    let mut cmd = Command::new("sandbox-exec");
+    cmd.arg("-p")
+        .arg(profile)
+        .arg(program)
+        .args(args)
+        .current_dir(&workspace);
+    Ok(cmd)
 }
 
 async fn run_linux(
@@ -183,6 +275,50 @@ async fn run_linux(
         }
         other => other,
     })
+}
+
+fn sandboxed_command_linux(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    policy: &SandboxPolicy,
+) -> Result<Command, SandboxError> {
+    let workspace = cwd
+        .canonicalize()
+        .map_err(|e| SandboxError::Execution(format!("Cannot resolve workspace: {e}")))?;
+
+    let mut cmd = Command::new("bwrap");
+    cmd.arg("--die-with-parent")
+        .arg("--new-session")
+        .arg("--proc")
+        .arg("/proc")
+        .arg("--dev-bind")
+        .arg("/dev")
+        .arg("/dev")
+        .arg("--ro-bind")
+        .arg("/")
+        .arg("/");
+
+    match policy.mode {
+        SandboxMode::ReadOnly => {
+            cmd.arg("--ro-bind").arg(&workspace).arg(&workspace);
+        }
+        SandboxMode::WorkspaceWrite => {
+            cmd.arg("--bind").arg(&workspace).arg(&workspace);
+        }
+        SandboxMode::DangerFullAccess => {}
+    }
+
+    if !policy.network_access {
+        cmd.arg("--unshare-net");
+    }
+
+    cmd.arg("--chdir")
+        .arg(&workspace)
+        .arg(program)
+        .args(args);
+
+    Ok(cmd)
 }
 
 async fn run_with_timeout(
@@ -247,4 +383,3 @@ fn escape_seatbelt_path(path: &Path) -> String {
 fn seatbelt_profile(_workspace: &Path, _policy: &SandboxPolicy) -> String {
     String::new()
 }
-

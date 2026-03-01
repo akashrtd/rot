@@ -20,7 +20,8 @@ Recursive Operations Tool, an AI coding agent for the terminal.
 Main capabilities:
 - Interactive TUI chat.
 - Single-shot `exec` mode for automation and CI.
-- Tool use (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `webfetch`).
+- Tool use (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `task`, `webfetch`).
+- Config-driven custom tools and MCP stdio servers.
 - Multi-provider model support (Anthropic, z.ai, OpenAI-compatible).
 - Session persistence.
 - Sandbox and approval policy controls.
@@ -108,6 +109,14 @@ rot session list
 rot session resume <ID>
 ```
 
+### Tool inspection
+
+```bash
+rot tools
+rot tools read
+rot tools mcp__filesystem__read_file
+```
+
 ## Security and Approval
 
 Global flags:
@@ -131,6 +140,12 @@ Defaults:
 - `sandbox_network_access=false`
 
 In non-interactive `exec`, approval is forced to `never`.
+
+External tool behavior:
+- Custom command tools run under the active sandbox at call time.
+- MCP stdio servers start under the active sandbox at startup.
+- MCP tools are exported as `mcp__<server>__<tool>`.
+- Under `untrusted` and `on-request`, MCP tools require approval by default.
 
 ## Exec Automation Output
 
@@ -177,6 +192,10 @@ Slash command popup:
 - Use `Up`/`Down` to select.
 - Press `Enter` to run selected command.
 
+Tool inspection in the TUI:
+- `/tools` lists loaded tools
+- `/tool <name>` shows one tool schema
+
 ## Built-in Tools
 
 | Tool | Purpose |
@@ -187,7 +206,71 @@ Slash command popup:
 | `bash` | Execute shell commands |
 | `glob` | Find files by pattern |
 | `grep` | Regex search across files |
+| `task` | Delegate work to a built-in subagent |
 | `webfetch` | Fetch URL content |
+
+## Configuration
+
+Global config lives at `~/.rot/config.json`.
+
+Example:
+
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-3-5-sonnet-latest",
+  "approval_policy": "on-request",
+  "sandbox_mode": "workspace-write",
+  "sandbox_network_access": false,
+  "api_keys": {
+    "anthropic": "sk-ant-..."
+  },
+  "custom_tools": [
+    {
+      "name": "echo_args",
+      "description": "Echo the raw JSON arguments",
+      "command": "cat \"$ROT_TOOL_ARGS_FILE\"",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" }
+        }
+      },
+      "timeout_secs": 30
+    }
+  ],
+  "mcp_servers": [
+    {
+      "name": "filesystem",
+      "enabled": true,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ],
+      "cwd": ".",
+      "env": {},
+      "startup_timeout_secs": 20,
+      "tool_timeout_secs": 60
+    }
+  ]
+}
+```
+
+Custom tool command contract:
+- `ROT_TOOL_NAME`
+- `ROT_TOOL_ARGS_FILE`
+- `ROT_TOOL_ARGS_JSON`
+- `ROT_SESSION_ID`
+
+MCP scope in this release:
+- stdio transport only
+- protocol version `2025-06-18`
+- startup discovery through `tools/list`
+- tool invocation through `tools/call`
+- per-server `enabled` flag
+- optional per-server `cwd`
 
 ## Providers
 
@@ -210,6 +293,7 @@ rot --provider openai
 crates/
   rot-cli       # binary entrypoint and CLI parsing
   rot-core      # agent loop, security policy, messages
+  rot-mcp       # MCP stdio client
   rot-provider  # provider trait + provider implementations
   rot-tools     # built-in tools
   rot-sandbox   # shell sandbox backends

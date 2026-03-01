@@ -3,7 +3,6 @@
 use rot_core::{Agent, AgentConfig, AgentRegistry, ApprovalPolicy, ContentBlock, Message, RuntimeSecurityConfig, SandboxMode};
 use rot_provider::{AnthropicProvider, Provider, new_openai_provider, new_zai_provider};
 use rot_session::SessionStore;
-use rot_tools::ToolRegistry;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -58,8 +57,7 @@ pub async fn run(
     let sandbox_mode_label = sandbox_mode_label(runtime_security.sandbox_mode).to_string();
     let approval_policy_label = approval_policy_label(runtime_security.approval_policy).to_string();
 
-    let mut tools = ToolRegistry::new();
-    rot_tools::register_all(&mut tools);
+    let (_, tools) = super::load_tool_registry(runtime_security.clone()).await?;
 
     let config = AgentConfig {
         agent_name: agent_profile.name.to_string(),

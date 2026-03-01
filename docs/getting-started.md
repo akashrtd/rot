@@ -16,6 +16,7 @@ cargo install --path crates/rot-cli
 - **API key** — at least one of:
   - `ANTHROPIC_API_KEY` for Anthropic Claude
   - `ZAI_API_KEY` for z.ai GLM-5
+  - `OPENAI_API_KEY` for OpenAI-compatible models
 
 ## First Run
 
@@ -57,7 +58,14 @@ rot session list          # See recent sessions
 rot session resume <ID>   # Resume a session (planned)
 ```
 
+### Tool Inspection
+
+```bash
+rot tools
+rot tools read
+```
+
 ## Next Steps
 
-- Read [Configuration](configuration.md) for provider and model options
-- Read [Tools](tools.md) for details on built-in tools
+- Read [Configuration](configuration.md) for provider, security, custom tool, and MCP options
+- Read [Tools](tools.md) for built-in and external tool details

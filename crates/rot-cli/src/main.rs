@@ -102,6 +102,10 @@ async fn main() -> anyhow::Result<()> {
                 eprintln!("Session resume not yet implemented: {id}");
             }
         },
+        Some(Commands::Tools { ref name }) => {
+            let security = cli.resolve_runtime_security(&config);
+            commands::tools::run(name.as_deref(), security).await?;
+        }
     }
 
     Ok(())

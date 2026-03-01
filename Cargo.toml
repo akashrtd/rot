@@ -2,6 +2,7 @@
 members = [
     "crates/rot-cli",
     "crates/rot-core",
+    "crates/rot-mcp",
     "crates/rot-rlm",
     "crates/rot-provider",
     "crates/rot-sandbox",
@@ -66,6 +67,7 @@ tokio-test = "0.4"
 
 # Internal crates
 rot-core = { path = "crates/rot-core" }
+rot-mcp = { path = "crates/rot-mcp" }
 rot-rlm = { path = "crates/rot-rlm" }
 rot-provider = { path = "crates/rot-provider" }
 rot-sandbox = { path = "crates/rot-sandbox" }

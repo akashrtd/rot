@@ -1872,6 +1872,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rot-mcp"
+version = "0.1.0"
+dependencies = [
+ "rot-sandbox",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "rot-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1950,6 +1962,7 @@ dependencies = [
  "ignore",
  "regex",
  "reqwest",
+ "rot-mcp",
  "rot-sandbox",
  "schemars",
  "serde",
@@ -1958,6 +1971,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "ulid",
 ]
 
 [[package]]

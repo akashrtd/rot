@@ -122,6 +122,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: SessionAction,
     },
+
+    /// Inspect loaded tools.
+    Tools {
+        /// Show one tool in detail.
+        name: Option<String>,
+    },
 }
 
 impl Cli {
@@ -291,6 +297,15 @@ mod tests {
                 action: SessionAction::Tree { id },
             }) => assert_eq!(id.as_deref(), Some("abc123")),
             _ => panic!("expected session tree command"),
+        }
+    }
+
+    #[test]
+    fn test_tools_command_parses_optional_name() {
+        let parsed = Cli::try_parse_from(["rot", "tools", "read"]).unwrap();
+        match parsed.command {
+            Some(Commands::Tools { name }) => assert_eq!(name.as_deref(), Some("read")),
+            _ => panic!("expected tools command"),
         }
     }
 }

@@ -1,7 +1,6 @@
 use rot_core::AgentRegistry;
 use rot_provider::{AnthropicProvider, Provider, new_openai_provider, new_zai_provider};
 use rot_session::SessionStore;
-use rot_tools::ToolRegistry;
 
 /// Run interactive chat mode.
 pub async fn run(
@@ -10,18 +9,15 @@ pub async fn run(
     agent_name: Option<&str>,
     runtime_security: rot_core::RuntimeSecurityConfig,
 ) -> anyhow::Result<()> {
-    let mut tools = ToolRegistry::new();
-    rot_tools::register_all(&mut tools);
+    let config_store = rot_core::config::ConfigStore::new();
+    config_store.hydrate_env();
+    let (config, tools) = super::load_tool_registry(runtime_security.clone()).await?;
     let agent_profile = AgentRegistry::resolve(agent_name)?;
     let system_prompt = if agent_profile.name == "default" {
         AgentRegistry::default_chat_system_prompt().to_string()
     } else {
         agent_profile.system_prompt.to_string()
     };
-
-    let config_store = rot_core::config::ConfigStore::new();
-    config_store.hydrate_env();
-    let config = config_store.load();
 
     // If no provider or model were specified, fall back to the config store
     let final_provider = if provider_name.is_empty() {

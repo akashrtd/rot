@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+rot-mcp = { workspace = true }
 rot-sandbox = { workspace = true }
 
 tokio = { workspace = true }
@@ -16,6 +17,7 @@ schemars = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true }
+ulid = { workspace = true }
 
 # File globbing with .gitignore support
 glob = "0.3"

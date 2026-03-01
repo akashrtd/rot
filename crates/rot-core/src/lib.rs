@@ -10,7 +10,7 @@ pub mod config;
 pub mod security;
 
 
-pub use agent::{Agent, AgentConfig, AgentProcessError};
+pub use agent::{Agent, AgentConfig, AgentProcessError, TaskExecutionPolicy};
 pub use agent_profile::{AgentMode, AgentProfile};
 pub use agent_registry::{AgentRegistry, UnknownAgentError};
 pub use error::RotError;

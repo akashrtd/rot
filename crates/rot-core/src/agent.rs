@@ -9,6 +9,7 @@
 use crate::message::{ContentBlock, Message, Role};
 use crate::permission::{ApprovalResponse, PermissionSystem};
 use crate::security::{RuntimeSecurityConfig, SandboxMode};
+use futures::future::join_all;
 use futures::StreamExt;
 use rot_session::{SessionEntry, SessionStore};
 use rot_provider::{
@@ -16,12 +17,39 @@ use rot_provider::{
     ToolDefinition,
 };
 use rot_tools::{TaskExecution, TaskRequest, TaskRunner, ToolContext, ToolRegistry};
-use std::path::PathBuf;
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_ITERATIONS: usize = 50;
+
+/// Execution limits for delegated `task` tool calls.
+#[derive(Debug, Clone)]
+pub struct TaskExecutionPolicy {
+    /// Maximum allowed nested task depth.
+    pub max_depth: usize,
+    /// Maximum number of delegated subtasks that may be started in one agent run.
+    pub max_total_tasks: usize,
+    /// Maximum number of delegated subtasks that may run at the same time.
+    pub max_concurrent_tasks: usize,
+    /// Timeout applied to each delegated subtask, including waiting for concurrency budget.
+    pub task_timeout: Duration,
+}
+
+impl Default for TaskExecutionPolicy {
+    fn default() -> Self {
+        Self {
+            max_depth: 1,
+            max_total_tasks: 8,
+            max_concurrent_tasks: 1,
+            task_timeout: Duration::from_secs(120),
+        }
+    }
+}
 
 /// Agent configuration.
 #[derive(Debug, Clone)]
@@ -34,6 +62,8 @@ pub struct AgentConfig {
     pub system_prompt: Option<String>,
     /// Maximum tokens per response.
     pub max_tokens: Option<usize>,
+    /// Limits for delegated task execution.
+    pub task_policy: TaskExecutionPolicy,
 }
 
 impl Default for AgentConfig {
@@ -43,6 +73,7 @@ impl Default for AgentConfig {
             agent_name: "default".to_string(),
             system_prompt: None,
             max_tokens: None,
+            task_policy: TaskExecutionPolicy::default(),
         }
     }
 }
@@ -70,6 +101,7 @@ pub struct Agent {
     on_event: Option<EventCallback>,
     on_approval: Option<ApprovalCallback>,
     permission_system: Arc<Mutex<PermissionSystem>>,
+    task_controller: Arc<TaskController>,
 }
 
 impl Agent {
@@ -81,6 +113,7 @@ impl Agent {
         runtime_security: RuntimeSecurityConfig,
     ) -> Self {
         let permission_system = PermissionSystem::new(runtime_security.approval_policy);
+        let task_policy = config.task_policy.clone();
         Self {
             provider,
             tools,
@@ -90,6 +123,7 @@ impl Agent {
             on_event: None,
             on_approval: None,
             permission_system: Arc::new(Mutex::new(permission_system)),
+            task_controller: Arc::new(TaskController::new(task_policy)),
         }
     }
 
@@ -152,7 +186,7 @@ impl Agent {
             network_access: self.runtime_security.sandbox_network_access
                 || self.runtime_security.sandbox_mode == SandboxMode::DangerFullAccess,
             task_depth: invocation.task_depth,
-            max_task_depth: 1,
+            max_task_depth: self.config.task_policy.max_depth,
             task_runner: Some(Arc::new(AgentTaskRunner {
                 agent: Arc::clone(self),
                 parent_session_id: invocation.session_id.clone(),
@@ -248,8 +282,11 @@ impl Agent {
                 return Ok(messages.last().cloned().unwrap());
             }
 
-            // Execute tool calls and add results
-            for tc in &tool_calls {
+            // Execute tool calls and add results. Task calls may run concurrently.
+            let mut tool_messages: Vec<(usize, Message)> = Vec::new();
+            let mut parallel_task_calls: Vec<(usize, PendingToolCall, serde_json::Value)> = Vec::new();
+
+            for (idx, tc) in tool_calls.iter().enumerate() {
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.arguments).unwrap_or(serde_json::Value::Null);
 
@@ -260,12 +297,11 @@ impl Agent {
                 };
                 
                 if is_denied {
-                    let tool_msg = Message::tool_result(
+                    tool_messages.push((idx, Message::tool_result(
                         tc.id.clone(),
                         format!("Execution of '{}' is permanently denied for this session.", tc.name),
                         true,
-                    );
-                    messages.push(tool_msg);
+                    )));
                     continue;
                 }
 
@@ -276,43 +312,48 @@ impl Agent {
 
                         match response {
                             ApprovalResponse::DenyOnce | ApprovalResponse::DenyAlways => {
-                                let tool_msg = Message::tool_result(
+                                tool_messages.push((idx, Message::tool_result(
                                     tc.id.clone(),
                                     format!("User denied permission to run '{}'", tc.name),
                                     true,
-                                );
-                                messages.push(tool_msg);
+                                )));
                                 continue;
                             }
                             _ => {} // Allowed, proceed to execute
                         }
                     } else {
                         // If no callback is hooked up but approval is required, fail safe.
-                        let tool_msg = Message::tool_result(
+                        tool_messages.push((idx, Message::tool_result(
                             tc.id.clone(),
                             format!("Cannot execute '{}': No interactive approval handler configured.", tc.name),
                             true,
-                        );
-                        messages.push(tool_msg);
+                        )));
                         continue;
                     }
                 }
 
-                let result = if let Some(tool) = self.tools.get(&tc.name) {
-                    match tool.execute(args, &tool_ctx).await {
-                        Ok(result) => result,
-                        Err(e) => rot_tools::ToolResult::error(format!("Tool error: {e}")),
-                    }
+                if tc.name == "task" {
+                    parallel_task_calls.push((idx, tc.clone(), args));
                 } else {
-                    rot_tools::ToolResult::error(format!("Unknown tool: {}", tc.name))
-                };
+                    let tool_msg = self
+                        .execute_tool_call(tc.clone(), args, tool_ctx.clone())
+                        .await;
+                    tool_messages.push((idx, tool_msg));
+                }
+            }
 
-                let tool_msg = Message::tool_result_with_metadata(
-                    tc.id.clone(),
-                    result.output,
-                    result.is_error,
-                    result.metadata,
-                );
+            if !parallel_task_calls.is_empty() {
+                let task_results = join_all(parallel_task_calls.into_iter().map(|(idx, tc, args)| {
+                    let agent = Arc::clone(self);
+                    let tool_ctx = tool_ctx.clone();
+                    async move { (idx, agent.execute_tool_call(tc, args, tool_ctx).await) }
+                }))
+                .await;
+                tool_messages.extend(task_results);
+            }
+
+            tool_messages.sort_by_key(|(idx, _)| *idx);
+            for (_, tool_msg) in tool_messages {
                 messages.push(tool_msg);
             }
 
@@ -393,6 +434,29 @@ impl Agent {
             })
             .collect()
     }
+
+    async fn execute_tool_call(
+        self: &Arc<Self>,
+        tool_call: PendingToolCall,
+        args: serde_json::Value,
+        tool_ctx: ToolContext,
+    ) -> Message {
+        let result = if let Some(tool) = self.tools.get(&tool_call.name) {
+            match tool.execute(args, &tool_ctx).await {
+                Ok(result) => result,
+                Err(e) => rot_tools::ToolResult::error(format!("Tool error: {e}")),
+            }
+        } else {
+            rot_tools::ToolResult::error(format!("Unknown tool: {}", tool_call.name))
+        };
+
+        Message::tool_result_with_metadata(
+            tool_call.id,
+            result.output,
+            result.is_error,
+            result.metadata,
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -425,6 +489,8 @@ impl TaskRunner for AgentTaskRunner {
                 profile.name
             )));
         }
+
+        let _budget = self.agent.task_controller.acquire().await?;
 
         let session_store = SessionStore::new();
         let child_session = if self.parent_session_id.is_empty() {
@@ -476,13 +542,21 @@ impl TaskRunner for AgentTaskRunner {
             task_depth: self.task_depth + 1,
         };
         let mut messages = Vec::new();
-        let response = self
-            .agent
-            .process_with_invocation(&mut messages, &request.prompt, invocation)
-            .await
-            .map_err(|e| {
-                rot_tools::ToolError::ExecutionError(format!("Subagent execution failed: {e}"))
-            })?;
+        let response = tokio::time::timeout(
+            self.agent.config.task_policy.task_timeout,
+            self.agent
+                .process_with_invocation(&mut messages, &request.prompt, invocation),
+        )
+        .await
+        .map_err(|_| {
+            rot_tools::ToolError::Timeout(format!(
+                "Subagent '{}' timed out after {:?}",
+                profile.name, self.agent.config.task_policy.task_timeout
+            ))
+        })?
+        .map_err(|e| {
+            rot_tools::ToolError::ExecutionError(format!("Subagent execution failed: {e}"))
+        })?;
 
         if let Some(mut child_session) = child_session {
             let entries = messages_to_session_entries(&messages).map_err(|e| {
@@ -562,7 +636,72 @@ fn messages_to_session_entries(messages: &[Message]) -> Result<Vec<SessionEntry>
     Ok(entries)
 }
 
+struct TaskController {
+    policy: TaskExecutionPolicy,
+    total_started: AtomicUsize,
+    semaphore: Arc<Semaphore>,
+}
+
+impl TaskController {
+    fn new(policy: TaskExecutionPolicy) -> Self {
+        Self {
+            semaphore: Arc::new(Semaphore::new(policy.max_concurrent_tasks.max(1))),
+            policy,
+            total_started: AtomicUsize::new(0),
+        }
+    }
+
+    async fn acquire(&self) -> Result<TaskBudgetTicket, rot_tools::ToolError> {
+        self.reserve_total_budget()?;
+
+        let permit = tokio::time::timeout(
+            self.policy.task_timeout,
+            self.semaphore.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| {
+            rot_tools::ToolError::Timeout(format!(
+                "Timed out waiting for subtask concurrency slot after {:?}",
+                self.policy.task_timeout
+            ))
+        })?
+        .map_err(|_| {
+            rot_tools::ToolError::ExecutionError(
+                "Task controller closed unexpectedly".to_string(),
+            )
+        })?;
+
+        Ok(TaskBudgetTicket { _permit: permit })
+    }
+
+    fn reserve_total_budget(&self) -> Result<(), rot_tools::ToolError> {
+        loop {
+            let current = self.total_started.load(Ordering::SeqCst);
+            if current >= self.policy.max_total_tasks {
+                return Err(rot_tools::ToolError::PermissionDenied(format!(
+                    "task budget exhausted (max_total_tasks={})",
+                    self.policy.max_total_tasks
+                )));
+            }
+
+            if self
+                .total_started
+                .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct TaskBudgetTicket {
+    _permit: OwnedSemaphorePermit,
+}
+
 /// Pending tool call being accumulated from streaming events.
+#[derive(Clone)]
 struct PendingToolCall {
     id: String,
     name: String,
@@ -583,6 +722,7 @@ pub enum AgentProcessError {
 mod tests {
     use super::*;
     use futures::stream::{self, BoxStream, StreamExt};
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::Mutex as StdMutex;
 
     #[test]
@@ -590,6 +730,8 @@ mod tests {
         let config = AgentConfig::default();
         assert_eq!(config.max_iterations, MAX_ITERATIONS);
         assert!(config.system_prompt.is_none());
+        assert_eq!(config.task_policy.max_depth, 1);
+        assert_eq!(config.task_policy.max_total_tasks, 8);
     }
 
     #[test]
@@ -656,6 +798,102 @@ mod tests {
         assert!(tool_result.1["child_session_id"].is_null());
     }
 
+    #[tokio::test]
+    async fn test_task_timeout_surfaces_as_tool_error() {
+        let provider = Box::new(TaskTimeoutProvider {
+            step: StdMutex::new(0),
+        });
+        let mut tools = ToolRegistry::new();
+        rot_tools::register_all(&mut tools);
+        let mut config = AgentConfig::default();
+        config.task_policy.task_timeout = Duration::from_millis(10);
+
+        let agent = Arc::new(Agent::new(
+            provider,
+            tools,
+            config,
+            RuntimeSecurityConfig {
+                approval_policy: crate::security::ApprovalPolicy::Never,
+                ..RuntimeSecurityConfig::default()
+            },
+        ));
+
+        let mut messages = Vec::new();
+        let response = agent.process(&mut messages, "start").await.unwrap();
+        assert_eq!(response.text(), "parent recovered");
+
+        let timeout_error = messages.iter().find_map(|message| {
+            message.content.iter().find_map(|block| match block {
+                ContentBlock::ToolResult {
+                    content, is_error, ..
+                } if *is_error => Some(content.clone()),
+                _ => None,
+            })
+        });
+        let Some(timeout_error) = timeout_error else {
+            panic!("expected timeout tool result");
+        };
+        assert!(timeout_error.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn test_parallel_task_calls_run_concurrently() {
+        let state = Arc::new(ParallelTaskState {
+            call_count: AtomicUsize::new(0),
+            active_subagents: AtomicUsize::new(0),
+            max_active_subagents: AtomicUsize::new(0),
+        });
+        let provider = Box::new(ParallelTaskProvider {
+            state: Arc::clone(&state),
+        });
+        let mut tools = ToolRegistry::new();
+        rot_tools::register_all(&mut tools);
+        let mut config = AgentConfig::default();
+        config.task_policy.max_total_tasks = 4;
+        config.task_policy.max_concurrent_tasks = 2;
+        config.task_policy.task_timeout = Duration::from_secs(1);
+
+        let agent = Arc::new(Agent::new(
+            provider,
+            tools,
+            config,
+            RuntimeSecurityConfig {
+                approval_policy: crate::security::ApprovalPolicy::Never,
+                ..RuntimeSecurityConfig::default()
+            },
+        ));
+
+        let mut messages = Vec::new();
+        let response = agent.process(&mut messages, "fan out").await.unwrap();
+        assert_eq!(response.text(), "parallel done");
+        assert!(state.max_active_subagents.load(AtomicOrdering::SeqCst) >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_task_controller_enforces_total_budget() {
+        let controller = TaskController::new(TaskExecutionPolicy {
+            max_total_tasks: 1,
+            ..TaskExecutionPolicy::default()
+        });
+
+        let _ticket = controller.acquire().await.unwrap();
+        let err = controller.acquire().await.unwrap_err();
+        assert!(matches!(err, rot_tools::ToolError::PermissionDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn test_task_controller_times_out_on_concurrency_limit() {
+        let controller = TaskController::new(TaskExecutionPolicy {
+            max_concurrent_tasks: 1,
+            task_timeout: Duration::from_millis(10),
+            ..TaskExecutionPolicy::default()
+        });
+
+        let _first = controller.acquire().await.unwrap();
+        let err = controller.acquire().await.unwrap_err();
+        assert!(matches!(err, rot_tools::ToolError::Timeout(_)));
+    }
+
     #[test]
     fn test_messages_to_session_entries_emits_tool_entries() {
         let message = Message::assistant(vec![
@@ -681,6 +919,20 @@ mod tests {
 
     struct TaskFlowProvider {
         step: StdMutex<usize>,
+    }
+
+    struct TaskTimeoutProvider {
+        step: StdMutex<usize>,
+    }
+
+    struct ParallelTaskState {
+        call_count: AtomicUsize,
+        active_subagents: AtomicUsize,
+        max_active_subagents: AtomicUsize,
+    }
+
+    struct ParallelTaskProvider {
+        state: Arc<ParallelTaskState>,
     }
 
     #[async_trait::async_trait]
@@ -779,6 +1031,186 @@ mod tests {
             };
 
             Ok(stream::iter(events).boxed())
+        }
+
+        async fn complete(&self, _: Request) -> Result<rot_provider::Response, ProviderError> {
+            unimplemented!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for TaskTimeoutProvider {
+        fn name(&self) -> &str {
+            "dummy"
+        }
+
+        fn models(&self) -> Vec<rot_provider::ModelInfo> {
+            vec![]
+        }
+
+        fn current_model(&self) -> &str {
+            "dummy"
+        }
+
+        fn set_model(&mut self, _: &str) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        async fn stream(
+            &self,
+            _: Request,
+        ) -> Result<BoxStream<'_, Result<StreamEvent, ProviderError>>, ProviderError> {
+            let step = {
+                let mut lock = self.step.lock().unwrap();
+                *lock += 1;
+                *lock
+            };
+
+            let stream: BoxStream<'_, Result<StreamEvent, ProviderError>> = match step {
+                1 => stream::iter(vec![
+                    Ok(StreamEvent::ToolCallStart {
+                        id: "task-call-timeout".to_string(),
+                        name: "task".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallDelta {
+                        id: "task-call-timeout".to_string(),
+                        delta: "{\"agent\":\"review\",\"prompt\":\"stall\"}".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallEnd {
+                        id: "task-call-timeout".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::ToolUse,
+                    }),
+                ])
+                .boxed(),
+                2 => stream::pending().boxed(),
+                3 => stream::iter(vec![
+                    Ok(StreamEvent::TextDelta {
+                        delta: "parent recovered".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::EndTurn,
+                    }),
+                ])
+                .boxed(),
+                other => panic!("unexpected provider step {other}"),
+            };
+
+            Ok(stream)
+        }
+
+        async fn complete(&self, _: Request) -> Result<rot_provider::Response, ProviderError> {
+            unimplemented!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for ParallelTaskProvider {
+        fn name(&self) -> &str {
+            "dummy"
+        }
+
+        fn models(&self) -> Vec<rot_provider::ModelInfo> {
+            vec![]
+        }
+
+        fn current_model(&self) -> &str {
+            "dummy"
+        }
+
+        fn set_model(&mut self, _: &str) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        async fn stream(
+            &self,
+            _: Request,
+        ) -> Result<BoxStream<'_, Result<StreamEvent, ProviderError>>, ProviderError> {
+            let call_no = self.state.call_count.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+
+            match call_no {
+                1 => Ok(stream::iter(vec![
+                    Ok(StreamEvent::ToolCallStart {
+                        id: "task-1".to_string(),
+                        name: "task".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallDelta {
+                        id: "task-1".to_string(),
+                        delta: "{\"agent\":\"review\",\"prompt\":\"first\"}".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallEnd {
+                        id: "task-1".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallStart {
+                        id: "task-2".to_string(),
+                        name: "task".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallDelta {
+                        id: "task-2".to_string(),
+                        delta: "{\"agent\":\"explore\",\"prompt\":\"second\"}".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallEnd {
+                        id: "task-2".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::ToolUse,
+                    }),
+                ])
+                .boxed()),
+                2 | 3 => {
+                    let active = self
+                        .state
+                        .active_subagents
+                        .fetch_add(1, AtomicOrdering::SeqCst)
+                        + 1;
+                    loop {
+                        let max_seen = self
+                            .state
+                            .max_active_subagents
+                            .load(AtomicOrdering::SeqCst);
+                        if active <= max_seen {
+                            break;
+                        }
+                        if self
+                            .state
+                            .max_active_subagents
+                            .compare_exchange(
+                                max_seen,
+                                active,
+                                AtomicOrdering::SeqCst,
+                                AtomicOrdering::SeqCst,
+                            )
+                            .is_ok()
+                        {
+                            break;
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    self.state
+                        .active_subagents
+                        .fetch_sub(1, AtomicOrdering::SeqCst);
+                    Ok(stream::iter(vec![
+                        Ok(StreamEvent::TextDelta {
+                            delta: format!("subagent {}", call_no),
+                        }),
+                        Ok(StreamEvent::Done {
+                            reason: StopReason::EndTurn,
+                        }),
+                    ])
+                    .boxed())
+                }
+                4 => Ok(stream::iter(vec![
+                    Ok(StreamEvent::TextDelta {
+                        delta: "parallel done".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::EndTurn,
+                    }),
+                ])
+                .boxed()),
+                other => panic!("unexpected provider step {other}"),
+            }
         }
 
         async fn complete(&self, _: Request) -> Result<rot_provider::Response, ProviderError> {

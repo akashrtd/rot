@@ -295,6 +295,109 @@ impl SessionStore {
         Ok(SessionTree { root, focus_id })
     }
 
+    /// Export a session JSONL file to another path.
+    pub async fn export_to_path(
+        &self,
+        cwd: &Path,
+        id: &str,
+        output_path: &Path,
+    ) -> Result<(), SessionError> {
+        let source = self.session_path(cwd, id);
+        if !source.exists() {
+            return Err(SessionError::NotFound(id.to_string()));
+        }
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        fs::copy(source, output_path).await?;
+        Ok(())
+    }
+
+    /// Import a session JSONL file into this store.
+    ///
+    /// The imported session gets a new ID unless `id_override` is provided.
+    pub async fn import_from_path(
+        &self,
+        cwd: &Path,
+        input_path: &Path,
+        id_override: Option<&str>,
+    ) -> Result<Session, SessionError> {
+        let content = fs::read_to_string(input_path).await?;
+        if content.trim().is_empty() {
+            return Err(SessionError::InvalidFormat(
+                "Cannot import empty session file".to_string(),
+            ));
+        }
+
+        let mut entries = Vec::new();
+        for (line_num, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let entry: SessionEntry = serde_json::from_str(line).map_err(|e| {
+                SessionError::InvalidFormat(format!("Line {}: {e}", line_num + 1))
+            })?;
+            entries.push(entry);
+        }
+        if entries.is_empty() {
+            return Err(SessionError::InvalidFormat(
+                "Cannot import session with no entries".to_string(),
+            ));
+        }
+
+        let target_id = id_override
+            .map(str::to_string)
+            .unwrap_or_else(|| ulid::Ulid::new().to_string());
+        let target_path = self.session_path(cwd, &target_id);
+        if target_path.exists() {
+            return Err(SessionError::InvalidFormat(format!(
+                "Session '{}' already exists",
+                target_id
+            )));
+        }
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        let mut out_lines = Vec::with_capacity(entries.len());
+        for (idx, entry) in entries.into_iter().enumerate() {
+            let normalized = if idx == 0 {
+                match entry {
+                    SessionEntry::SessionStart {
+                        timestamp,
+                        cwd,
+                        model,
+                        provider,
+                        parent_session_id,
+                        parent_tool_call_id,
+                        agent,
+                        ..
+                    } => SessionEntry::SessionStart {
+                        id: target_id.clone(),
+                        timestamp,
+                        cwd,
+                        model,
+                        provider,
+                        parent_session_id,
+                        parent_tool_call_id,
+                        agent,
+                    },
+                    _ => {
+                        return Err(SessionError::InvalidFormat(
+                            "First entry is not SessionStart".to_string(),
+                        ));
+                    }
+                }
+            } else {
+                entry
+            };
+            out_lines.push(serde_json::to_string(&normalized)?);
+        }
+
+        fs::write(&target_path, format!("{}\n", out_lines.join("\n"))).await?;
+        self.load(cwd, &target_id).await
+    }
+
     /// Read metadata from a session file (parses first and last lines).
     async fn read_session_meta(&self, path: &Path) -> Result<SessionMeta, SessionError> {
         let content = fs::read_to_string(path).await?;
@@ -529,6 +632,45 @@ mod tests {
         assert_eq!(tree.root.children.len(), 1);
         assert_eq!(tree.root.children[0].meta.id, child.id);
         assert_eq!(tree.root.children[0].children[0].meta.id, grandchild.id);
+    }
+
+    #[tokio::test]
+    async fn test_export_import_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let store = SessionStore::with_dir(dir.path());
+        let cwd = dir.path().join("project");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let mut session = store.create(&cwd, "claude", "anthropic").await.unwrap();
+        store
+            .append(
+                &mut session,
+                SessionEntry::Message {
+                    id: "msg1".to_string(),
+                    parent_id: None,
+                    timestamp: 1000,
+                    role: "user".to_string(),
+                    content: serde_json::json!([{"type": "text", "text": "hello"}]),
+                },
+            )
+            .await
+            .unwrap();
+
+        let export_path = dir.path().join("session-export.jsonl");
+        store
+            .export_to_path(&cwd, &session.id, &export_path)
+            .await
+            .unwrap();
+
+        let imported = store
+            .import_from_path(&cwd, &export_path, None)
+            .await
+            .unwrap();
+        assert_ne!(imported.id, session.id);
+        assert!(imported
+            .entries
+            .iter()
+            .any(|entry| matches!(entry, SessionEntry::Message { id, .. } if id == "msg1")));
     }
 
     #[tokio::test]

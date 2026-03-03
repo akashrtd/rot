@@ -4,6 +4,7 @@ members = [
     "crates/rot-core",
     "crates/rot-mcp",
     "crates/rot-rlm",
+    "crates/rot-serve",
     "crates/rot-provider",
     "crates/rot-sandbox",
     "crates/rot-tools",
@@ -43,6 +44,7 @@ jsonschema = "0.33"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
+axum = "0.8"
 
 # Errors
 thiserror = "2"
@@ -70,6 +72,7 @@ rot-core = { path = "crates/rot-core" }
 rot-mcp = { path = "crates/rot-mcp" }
 rot-rlm = { path = "crates/rot-rlm" }
 rot-provider = { path = "crates/rot-provider" }
+rot-serve = { path = "crates/rot-serve" }
 rot-sandbox = { path = "crates/rot-sandbox" }
 rot-tools = { path = "crates/rot-tools" }
 rot-tui = { path = "crates/rot-tui" }

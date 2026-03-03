@@ -1,4 +1,4 @@
-//! rot-tools: Built-in tools (read, write, edit, bash, glob, grep, webfetch).
+//! rot-tools: Built-in tools for files, shell, planning, and web operations.
 
 pub mod builtin;
 mod external;
@@ -14,5 +14,6 @@ pub use external::{register_custom_tools, CustomToolConfig};
 pub use mcp::{register_mcp_tools, McpServerConfig};
 pub use registry::ToolRegistry;
 pub use traits::{
-    SandboxMode, TaskExecution, TaskRequest, TaskRunner, Tool, ToolContext, ToolResult,
+    SandboxMode, SwarmExecution, SwarmRequest, SwarmWorkerResult, TaskExecution, TaskRequest,
+    TaskRunner, Tool, ToolContext, ToolResult,
 };

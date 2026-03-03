@@ -2,6 +2,8 @@
 
 pub mod chat;
 pub mod exec;
+pub mod models;
+pub mod providers;
 pub mod tools;
 
 use rot_core::{ConfigStore, RuntimeSecurityConfig, SandboxMode};

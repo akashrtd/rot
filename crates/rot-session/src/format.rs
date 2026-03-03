@@ -85,6 +85,17 @@ pub enum SessionEntry {
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
+
+    /// Artifact metadata linked to this session.
+    #[serde(rename = "artifact")]
+    Artifact {
+        id: String,
+        timestamp: u64,
+        kind: String,
+        path: String,
+        #[serde(default)]
+        metadata: serde_json::Value,
+    },
 }
 
 /// Metadata about a session (read from first line + computed stats).
@@ -143,6 +154,7 @@ pub fn entry_id(entry: &SessionEntry) -> &str {
         SessionEntry::ChildSessionLink { id, .. } => id,
         SessionEntry::Compaction { id, .. } => id,
         SessionEntry::Branch { id, .. } => id,
+        SessionEntry::Artifact { id, .. } => id,
     }
 }
 
@@ -156,6 +168,7 @@ pub fn entry_timestamp(entry: &SessionEntry) -> u64 {
         SessionEntry::ChildSessionLink { timestamp, .. } => *timestamp,
         SessionEntry::Compaction { timestamp, .. } => *timestamp,
         SessionEntry::Branch { timestamp, .. } => *timestamp,
+        SessionEntry::Artifact { timestamp, .. } => *timestamp,
     }
 }
 
@@ -294,6 +307,21 @@ mod tests {
             agent: None,
         };
         assert_eq!(entry_timestamp(&entry), 999);
+    }
+
+    #[test]
+    fn test_artifact_entry() {
+        let entry = SessionEntry::Artifact {
+            id: "artifact_1".to_string(),
+            timestamp: 1234567896,
+            kind: "rlm_trajectory".to_string(),
+            path: "/tmp/rot/trajectory.json".to_string(),
+            metadata: serde_json::json!({"runtime":"python"}),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"type\":\"artifact\""));
+        let deserialized: SessionEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry_id(&deserialized), "artifact_1");
     }
 
     #[test]

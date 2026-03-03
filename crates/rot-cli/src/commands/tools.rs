@@ -50,7 +50,22 @@ fn tool_kind(name: &str) -> &'static str {
         "mcp"
     } else if matches!(
         name,
-        "read" | "write" | "edit" | "bash" | "glob" | "grep" | "task" | "webfetch"
+        "read"
+            | "list"
+            | "codesearch"
+            | "lsp"
+            | "write"
+            | "edit"
+            | "patch"
+            | "question"
+            | "todoread"
+            | "todowrite"
+            | "bash"
+            | "glob"
+            | "grep"
+            | "task"
+            | "webfetch"
+            | "websearch"
     ) {
         "builtin"
     } else {

@@ -83,6 +83,7 @@ Basic alternatives:
 ```bash
 rot --provider zai
 rot --provider openai --model gpt-4o
+rot --provider ollama --model llama3.1
 rot -v
 ```
 
@@ -100,6 +101,8 @@ rot
 rot exec "read main.rs and summarize architecture"
 rot exec "find all TODO comments"
 rot exec "write a unit test for parser.rs"
+rot exec "continue from previous state" --session <ID>
+rot exec "try an alternative approach" --session <ID> --fork
 ```
 
 ### Session commands
@@ -107,6 +110,9 @@ rot exec "write a unit test for parser.rs"
 ```bash
 rot session list
 rot session resume <ID>
+rot session tree <ID>
+rot session export <ID> ./session.jsonl
+rot session import ./session.jsonl
 ```
 
 ### Tool inspection
@@ -115,6 +121,21 @@ rot session resume <ID>
 rot tools
 rot tools read
 rot tools mcp__filesystem__read_file
+```
+
+### Provider and model discovery
+
+```bash
+rot providers
+rot models
+rot --provider openrouter models
+```
+
+### Headless service mode
+
+```bash
+rot serve
+rot serve --host 0.0.0.0 --port 7878
 ```
 
 ## Security and Approval
@@ -201,13 +222,21 @@ Tool inspection in the TUI:
 | Tool | Purpose |
 | --- | --- |
 | `read` | Read file contents with offset/limit |
+| `list` | List files and directories |
+| `codesearch` | Ranked code-aware workspace search |
+| `lsp` | Experimental LSP-style lookup with fallback |
 | `write` | Create or overwrite files |
 | `edit` | Exact string replacement in files |
+| `patch` | Apply deterministic multi-hunk edits |
+| `question` | Ask structured clarification questions |
+| `todoread` | Read structured task state |
+| `todowrite` | Update structured task state |
 | `bash` | Execute shell commands |
 | `glob` | Find files by pattern |
 | `grep` | Regex search across files |
 | `task` | Delegate work to a built-in subagent |
 | `webfetch` | Fetch URL content |
+| `websearch` | Search the web for concise results |
 
 ## Configuration
 
@@ -277,7 +306,10 @@ MCP scope in this release:
 Configured providers:
 - Anthropic
 - z.ai
-- OpenAI-compatible
+- OpenAI
+- Ollama
+- OpenRouter
+- Google
 
 Provider selection:
 
@@ -285,7 +317,12 @@ Provider selection:
 rot --provider anthropic
 rot --provider zai
 rot --provider openai
+rot --provider ollama
+rot --provider openrouter
+rot --provider google
 ```
+
+Serve mode API is documented in [`docs/serve.md`](docs/serve.md).
 
 ## Workspace Layout
 

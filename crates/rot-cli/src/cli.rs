@@ -3,6 +3,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use rot_core::config::Config;
 use rot_core::security::{ApprovalPolicy, RuntimeSecurityConfig, SandboxMode};
+use rot_rlm::RlmRuntimeKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ApprovalPolicyArg {
@@ -34,6 +35,21 @@ impl From<SandboxModeArg> for SandboxMode {
             SandboxModeArg::ReadOnly => SandboxMode::ReadOnly,
             SandboxModeArg::WorkspaceWrite => SandboxMode::WorkspaceWrite,
             SandboxModeArg::DangerFullAccess => SandboxMode::DangerFullAccess,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RlmRuntimeArg {
+    Python,
+    Bash,
+}
+
+impl From<RlmRuntimeArg> for RlmRuntimeKind {
+    fn from(value: RlmRuntimeArg) -> Self {
+        match value {
+            RlmRuntimeArg::Python => RlmRuntimeKind::Python,
+            RlmRuntimeArg::Bash => RlmRuntimeKind::Bash,
         }
     }
 }
@@ -96,6 +112,14 @@ pub enum Commands {
         /// The prompt to execute.
         prompt: String,
 
+        /// Resume from an existing session ID.
+        #[arg(long)]
+        session: Option<String>,
+
+        /// Fork into a child session from --session.
+        #[arg(long, requires = "session")]
+        fork: bool,
+
         /// Run using the Recursive Language Model (RLM) engine for huge contexts.
         #[arg(long)]
         rlm: bool,
@@ -103,6 +127,10 @@ pub enum Commands {
         /// External context file to map into the RLM environment (required if --rlm is used)
         #[arg(long, requires = "rlm")]
         context: Option<String>,
+
+        /// Runtime backend for RLM execution.
+        #[arg(long = "rlm-runtime", requires = "rlm", value_enum)]
+        rlm_runtime: Option<RlmRuntimeArg>,
 
         /// Emit JSONL events to stdout.
         #[arg(long, conflicts_with = "final_json")]
@@ -127,6 +155,22 @@ pub enum Commands {
     Tools {
         /// Show one tool in detail.
         name: Option<String>,
+    },
+
+    /// List configured and available providers.
+    Providers,
+
+    /// List models for the active provider.
+    Models,
+
+    /// Run a local HTTP service for headless exec automation.
+    Serve {
+        /// Host interface to bind.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port to bind.
+        #[arg(long, default_value = "7878")]
+        port: u16,
     },
 }
 
@@ -235,11 +279,15 @@ mod tests {
                 json,
                 final_json,
                 output_schema,
+                session,
+                fork,
                 ..
             }) => {
                 assert!(json);
                 assert!(!final_json);
                 assert_eq!(output_schema.as_deref(), Some("schema.json"));
+                assert!(session.is_none());
+                assert!(!fork);
             }
             _ => panic!("expected exec"),
         }
@@ -308,6 +356,106 @@ mod tests {
             _ => panic!("expected tools command"),
         }
     }
+
+    #[test]
+    fn test_providers_command_parses() {
+        let parsed = Cli::try_parse_from(["rot", "providers"]).unwrap();
+        assert!(matches!(parsed.command, Some(Commands::Providers)));
+    }
+
+    #[test]
+    fn test_models_command_parses() {
+        let parsed = Cli::try_parse_from(["rot", "models"]).unwrap();
+        assert!(matches!(parsed.command, Some(Commands::Models)));
+    }
+
+    #[test]
+    fn test_serve_command_parses() {
+        let parsed = Cli::try_parse_from(["rot", "serve", "--host", "0.0.0.0", "--port", "9000"])
+            .unwrap();
+        match parsed.command {
+            Some(Commands::Serve { host, port }) => {
+                assert_eq!(host, "0.0.0.0");
+                assert_eq!(port, 9000);
+            }
+            _ => panic!("expected serve"),
+        }
+    }
+
+    #[test]
+    fn test_exec_rlm_runtime_parses() {
+        let parsed = Cli::try_parse_from([
+            "rot",
+            "exec",
+            "analyze",
+            "--rlm",
+            "--context",
+            "ctx.txt",
+            "--rlm-runtime",
+            "bash",
+        ])
+        .unwrap();
+        match parsed.command {
+            Some(Commands::Exec { rlm_runtime, .. }) => {
+                assert!(matches!(rlm_runtime, Some(super::RlmRuntimeArg::Bash)));
+            }
+            _ => panic!("expected exec"),
+        }
+    }
+
+    #[test]
+    fn test_exec_session_fork_parses() {
+        let parsed = Cli::try_parse_from([
+            "rot",
+            "exec",
+            "hello",
+            "--session",
+            "abc123",
+            "--fork",
+        ])
+        .unwrap();
+        match parsed.command {
+            Some(Commands::Exec { session, fork, .. }) => {
+                assert_eq!(session.as_deref(), Some("abc123"));
+                assert!(fork);
+            }
+            _ => panic!("expected exec"),
+        }
+    }
+
+    #[test]
+    fn test_session_export_import_parse() {
+        let export = Cli::try_parse_from([
+            "rot",
+            "session",
+            "export",
+            "abc123",
+            "out.jsonl",
+        ])
+        .unwrap();
+        assert!(matches!(
+            export.command,
+            Some(Commands::Session {
+                action: SessionAction::Export { .. }
+            })
+        ));
+
+        let import = Cli::try_parse_from([
+            "rot",
+            "session",
+            "import",
+            "in.jsonl",
+            "--id",
+            "abc123",
+        ])
+        .unwrap();
+        assert!(matches!(
+            import.command,
+            Some(Commands::Session {
+                action: SessionAction::Import { .. }
+            })
+        ));
+    }
 }
 
 #[derive(Subcommand)]
@@ -327,5 +475,20 @@ pub enum SessionAction {
     Resume {
         /// Session ID to resume.
         id: String,
+    },
+    /// Export a session JSONL transcript.
+    Export {
+        /// Session ID to export.
+        id: String,
+        /// Output JSONL file path.
+        output: String,
+    },
+    /// Import a session JSONL transcript.
+    Import {
+        /// Input JSONL file path.
+        input: String,
+        /// Optional session ID override.
+        #[arg(long)]
+        id: Option<String>,
     },
 }

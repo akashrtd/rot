@@ -25,6 +25,9 @@ Example:
 rot --provider anthropic
 rot --provider zai
 rot --provider openai
+rot --provider ollama
+rot --provider openrouter
+rot --provider google
 ```
 
 ## Model Selection
@@ -43,7 +46,10 @@ If `--model` is not specified, each provider uses its own default.
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Anthropic | Yes when using Anthropic |
 | `ZAI_API_KEY` | z.ai | Yes when using z.ai |
-| `OPENAI_API_KEY` | OpenAI-compatible | Yes when using OpenAI-compatible |
+| `OPENAI_API_KEY` | OpenAI | Yes when using OpenAI |
+| `OPENROUTER_API_KEY` | OpenRouter | Yes when using OpenRouter |
+| `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Google | Yes when using Google |
+| `OLLAMA_BASE_URL` | Ollama | Optional, default `http://localhost:11434/v1` |
 
 ## Security Configuration
 

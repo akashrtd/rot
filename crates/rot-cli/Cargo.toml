@@ -16,6 +16,7 @@ rot-tools = { workspace = true }
 rot-session = { workspace = true }
 rot-tui = { workspace = true }
 rot-rlm = { workspace = true }
+rot-serve = { workspace = true }
 
 tokio = { workspace = true }
 clap = { workspace = true }

@@ -40,11 +40,106 @@ pub struct TaskExecution {
     pub agent: String,
 }
 
+/// Request payload for orchestrated swarm delegation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwarmRequest {
+    /// Planner agent used for initial decomposition.
+    pub planner_agent: String,
+    /// Worker agents that execute planned subtasks.
+    pub workers: Vec<String>,
+    /// Merger agent used to synthesize worker outputs.
+    pub merge_agent: String,
+    /// Root prompt for the swarm run.
+    pub prompt: String,
+}
+
+/// One worker output inside a swarm execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwarmWorkerResult {
+    /// Worker agent name.
+    pub agent: String,
+    /// Worker final output.
+    pub final_text: String,
+    /// Child session identifier for audit linkage.
+    pub child_session_id: Option<String>,
+}
+
+/// Result of orchestrated swarm delegation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwarmExecution {
+    /// Planner output text.
+    pub planner_output: String,
+    /// Merged final output text.
+    pub merged_text: String,
+    /// Structured worker outputs.
+    pub workers: Vec<SwarmWorkerResult>,
+}
+
 /// Callback interface used by the `task` tool.
 #[async_trait]
 pub trait TaskRunner: Send + Sync {
     /// Execute a delegated task and return the final subagent response.
     async fn run_task(&self, request: TaskRequest) -> Result<TaskExecution, ToolError>;
+
+    /// Execute a planner/worker/merge swarm workflow.
+    ///
+    /// Default behavior is sequential and conservative; runtimes can override this
+    /// for bounded parallelism.
+    async fn run_swarm(&self, request: SwarmRequest) -> Result<SwarmExecution, ToolError> {
+        if request.workers.is_empty() {
+            return Err(ToolError::InvalidParameters(
+                "swarm requires at least one worker".to_string(),
+            ));
+        }
+
+        let planner = self
+            .run_task(TaskRequest {
+                agent: request.planner_agent.clone(),
+                prompt: format!(
+                    "Create a concise execution plan for {} worker(s).\nTask:\n{}",
+                    request.workers.len(),
+                    request.prompt
+                ),
+            })
+            .await?;
+
+        let mut workers = Vec::with_capacity(request.workers.len());
+        for worker in &request.workers {
+            let result = self
+                .run_task(TaskRequest {
+                    agent: worker.clone(),
+                    prompt: format!(
+                        "Task:\n{}\n\nPlanner guidance:\n{}",
+                        request.prompt, planner.final_text
+                    ),
+                })
+                .await?;
+            workers.push(SwarmWorkerResult {
+                agent: result.agent,
+                final_text: result.final_text,
+                child_session_id: result.child_session_id,
+            });
+        }
+
+        let merge_payload = serde_json::to_string_pretty(&workers)
+            .map_err(|e| ToolError::ExecutionError(format!("Failed to encode worker results: {e}")))?;
+        let merged = self
+            .run_task(TaskRequest {
+                agent: request.merge_agent.clone(),
+                prompt: format!(
+                    "Merge these worker outputs into one final answer for the original task.\n\
+                     Original task:\n{}\n\nWorker outputs (JSON):\n{}",
+                    request.prompt, merge_payload
+                ),
+            })
+            .await?;
+
+        Ok(SwarmExecution {
+            planner_output: planner.final_text,
+            merged_text: merged.final_text,
+            workers,
+        })
+    }
 }
 
 /// Context provided to tools during execution.

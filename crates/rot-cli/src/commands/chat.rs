@@ -1,5 +1,4 @@
 use rot_core::AgentRegistry;
-use rot_provider::{AnthropicProvider, Provider, new_openai_provider, new_zai_provider};
 use rot_session::SessionStore;
 
 /// Run interactive chat mode.
@@ -27,7 +26,7 @@ pub async fn run(
     };
 
     let final_model = model.unwrap_or(&config.model);
-    let provider = create_provider(final_provider, Some(final_model))?;
+    let provider = crate::provider_factory::create_provider(final_provider, Some(final_model), true)?;
     let model_name = provider.current_model().to_string();
 
     let session_store = SessionStore::new();
@@ -37,7 +36,7 @@ pub async fn run(
         tools,
         session_store,
         &model_name,
-        provider_name,
+        final_provider,
         agent_profile.name,
         system_prompt,
         runtime_security,
@@ -46,39 +45,4 @@ pub async fn run(
         .map_err(|e| anyhow::anyhow!("TUI error: {e}"))?;
 
     Ok(())
-}
-
-fn create_provider(
-    provider_name: &str,
-    model: Option<&str>,
-) -> anyhow::Result<Box<dyn Provider>> {
-    match provider_name {
-        "anthropic" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
-            let mut provider = AnthropicProvider::new(api_key);
-            if let Some(m) = model {
-                let _ = provider.set_model(m);
-            }
-            Ok(Box::new(provider))
-        }
-        "zai" => {
-            let api_key = std::env::var("ZAI_API_KEY").unwrap_or_default();
-            let mut provider = new_zai_provider(api_key);
-            if let Some(m) = model {
-                let _ = provider.set_model(m);
-            }
-            Ok(Box::new(provider))
-        }
-        "openai" => {
-            let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
-            let mut provider = new_openai_provider(api_key);
-            if let Some(m) = model {
-                let _ = provider.set_model(m);
-            }
-            Ok(Box::new(provider))
-        }
-        other => Err(anyhow::anyhow!(
-            "Unknown provider: {other}. Available: anthropic, zai, openai"
-        )),
-    }
 }

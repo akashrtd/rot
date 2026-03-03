@@ -161,10 +161,28 @@ context_length() {{
     wc -c < "$CONTEXT_FILE"
 }}
 
-# LLM query function (calls back to rot)
+# Structured nested LLM subcall request.
+SUBLM() {{
+    local query="$1"
+    local text_or_var="${{2:-}}"
+
+    python3 - "$query" "$text_or_var" <<'PY'
+import json
+import os
+import sys
+
+query = sys.argv[1]
+text = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] != "" else None
+payload = {{"query": query}}
+if text is not None:
+    payload["input"] = text
+print("__ROT_SUBLM__" + json.dumps(payload, ensure_ascii=False))
+PY
+}}
+
+# Backward-compatible helper alias.
 llm_query() {{
-    local prompt="$1"
-    echo "LLM_QUERY:$prompt:END_QUERY"
+    SUBLM "$1"
 }}
 
 # Final answer

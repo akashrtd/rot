@@ -155,13 +155,21 @@ async fn test_tool_registry_has_all_builtin_tools() {
         .collect();
 
     assert!(names.contains(&"read"), "Missing read tool");
+    assert!(names.contains(&"list"), "Missing list tool");
+    assert!(names.contains(&"codesearch"), "Missing codesearch tool");
+    assert!(names.contains(&"lsp"), "Missing lsp tool");
     assert!(names.contains(&"write"), "Missing write tool");
     assert!(names.contains(&"edit"), "Missing edit tool");
+    assert!(names.contains(&"patch"), "Missing patch tool");
+    assert!(names.contains(&"question"), "Missing question tool");
+    assert!(names.contains(&"todoread"), "Missing todoread tool");
+    assert!(names.contains(&"todowrite"), "Missing todowrite tool");
     assert!(names.contains(&"bash"), "Missing bash tool");
     assert!(names.contains(&"glob"), "Missing glob tool");
     assert!(names.contains(&"grep"), "Missing grep tool");
     assert!(names.contains(&"task"), "Missing task tool");
     assert!(names.contains(&"webfetch"), "Missing webfetch tool");
+    assert!(names.contains(&"websearch"), "Missing websearch tool");
 }
 
 #[tokio::test]
@@ -202,4 +210,16 @@ fn test_all_providers_have_models() {
 
     let zai = new_zai_provider("key".to_string());
     assert!(!zai.models().is_empty());
+
+    let openai = new_openai_provider("key".to_string());
+    assert!(!openai.models().is_empty());
+
+    let ollama = new_ollama_provider(String::new());
+    assert!(!ollama.models().is_empty());
+
+    let openrouter = new_openrouter_provider("key".to_string());
+    assert!(!openrouter.models().is_empty());
+
+    let google = new_google_provider("key".to_string());
+    assert!(!google.models().is_empty());
 }

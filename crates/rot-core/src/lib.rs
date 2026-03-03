@@ -8,6 +8,8 @@ pub mod message;
 pub mod permission;
 pub mod config;
 pub mod security;
+pub mod swarm;
+pub mod task_scheduler;
 
 
 pub use agent::{Agent, AgentConfig, AgentProcessError, TaskExecutionPolicy};

@@ -4,6 +4,7 @@
 
 mod cli;
 mod commands;
+mod provider_factory;
 
 use clap::Parser;
 use cli::{Cli, Commands, SessionAction};
@@ -35,8 +36,11 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Exec {
             ref prompt,
+            ref session,
+            fork,
             rlm,
             ref context,
+            rlm_runtime,
             json,
             final_json,
             ref output_schema,
@@ -53,8 +57,11 @@ async fn main() -> anyhow::Result<()> {
                 cli.model.as_deref(),
                 &cli.provider,
                 cli.agent.as_deref(),
+                session.as_deref(),
+                fork,
                 rlm,
                 context.as_deref(),
+                rlm_runtime.map(Into::into),
                 security,
                 options,
             )
@@ -99,12 +106,53 @@ async fn main() -> anyhow::Result<()> {
                 print_session_tree(&tree.root, &tree.focus_id, "", true, true);
             }
             SessionAction::Resume { id } => {
-                eprintln!("Session resume not yet implemented: {id}");
+                let store = rot_session::SessionStore::new();
+                let cwd = std::env::current_dir()?;
+                let session = store
+                    .load(&cwd, &id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                println!("Session {} loaded ({} entries)", session.id, session.entries.len());
+            }
+            SessionAction::Export { id, output } => {
+                let store = rot_session::SessionStore::new();
+                let cwd = std::env::current_dir()?;
+                store
+                    .export_to_path(&cwd, &id, std::path::Path::new(&output))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                println!("Exported session {} to {}", id, output);
+            }
+            SessionAction::Import { input, id } => {
+                let store = rot_session::SessionStore::new();
+                let cwd = std::env::current_dir()?;
+                let session = store
+                    .import_from_path(&cwd, std::path::Path::new(&input), id.as_deref())
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                println!("Imported session {}", session.id);
             }
         },
         Some(Commands::Tools { ref name }) => {
             let security = cli.resolve_runtime_security(&config);
             commands::tools::run(name.as_deref(), security).await?;
+        }
+        Some(Commands::Providers) => {
+            commands::providers::run()?;
+        }
+        Some(Commands::Models) => {
+            commands::models::run(&cli.provider)?;
+        }
+        Some(Commands::Serve { ref host, port }) => {
+            let security = cli.resolve_runtime_security_for_exec(&config)?;
+            rot_serve::run(rot_serve::ServeOptions {
+                bind: format!("{host}:{port}"),
+                provider: cli.provider.clone(),
+                model: cli.model.clone(),
+                agent: cli.agent.clone(),
+                runtime_security: security,
+            })
+            .await?;
         }
     }
 

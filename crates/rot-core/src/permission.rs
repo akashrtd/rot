@@ -82,9 +82,35 @@ impl PermissionSystem {
 pub fn is_auto_allowed_by_policy(policy: ApprovalPolicy, tool_name: &str) -> bool {
     match policy {
         ApprovalPolicy::Never => true,
-        ApprovalPolicy::Untrusted => matches!(tool_name, "read" | "grep" | "glob"),
+        ApprovalPolicy::Untrusted => {
+            matches!(
+                tool_name,
+                "read"
+                    | "grep"
+                    | "glob"
+                    | "list"
+                    | "codesearch"
+                    | "lsp"
+                    | "todoread"
+                    | "question"
+            )
+        }
         ApprovalPolicy::OnRequest => {
-            matches!(tool_name, "read" | "grep" | "glob" | "write" | "edit")
+            matches!(
+                tool_name,
+                "read"
+                    | "grep"
+                    | "glob"
+                    | "list"
+                    | "codesearch"
+                    | "lsp"
+                    | "todoread"
+                    | "question"
+                    | "write"
+                    | "edit"
+                    | "patch"
+                    | "todowrite"
+            )
         }
     }
 }
@@ -99,11 +125,19 @@ mod tests {
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "read"));
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "grep"));
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "glob"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "list"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "codesearch"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "lsp"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "todoread"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "question"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "write"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "edit"));
+        assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "patch"));
+        assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "todowrite"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "bash"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "task"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "webfetch"));
+        assert!(!is_auto_allowed_by_policy(ApprovalPolicy::Untrusted, "websearch"));
     }
 
     #[test]
@@ -111,16 +145,41 @@ mod tests {
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "read"));
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "grep"));
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "glob"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "list"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "codesearch"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "lsp"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "todoread"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "question"));
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "write"));
         assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "edit"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "patch"));
+        assert!(is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "todowrite"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "bash"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "task"));
         assert!(!is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "webfetch"));
+        assert!(!is_auto_allowed_by_policy(ApprovalPolicy::OnRequest, "websearch"));
     }
 
     #[test]
     fn test_never_policy_matrix() {
-        for tool in ["read", "grep", "glob", "write", "edit", "bash", "task", "webfetch"] {
+        for tool in [
+            "read",
+            "grep",
+            "glob",
+            "list",
+            "codesearch",
+            "lsp",
+            "todoread",
+            "question",
+            "write",
+            "edit",
+            "patch",
+            "todowrite",
+            "bash",
+            "task",
+            "webfetch",
+            "websearch",
+        ] {
             assert!(is_auto_allowed_by_policy(ApprovalPolicy::Never, tool));
         }
     }

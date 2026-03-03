@@ -823,6 +823,9 @@ fn format_child_session_detail(session: &Session) -> String {
             SessionEntry::ChildSessionLink { .. }
             | SessionEntry::Compaction { .. }
             | SessionEntry::Branch { .. } => {}
+            SessionEntry::Artifact { kind, path, .. } => {
+                lines.push(format!("meta    {} {}", kind, truncate_line(path, 88)));
+            }
         }
     }
 
@@ -880,6 +883,26 @@ fn create_provider(provider_name: &str, model: &str) -> std::result::Result<Box<
             let api_key = std::env::var("OPENAI_API_KEY")
                 .map_err(|_| "OPENAI_API_KEY not set".to_string())?;
             let mut provider = rot_provider::new_openai_provider(api_key);
+            provider.set_model(model).map_err(|e| e.to_string())?;
+            Ok(Box::new(provider))
+        }
+        "ollama" => {
+            let mut provider = rot_provider::new_ollama_provider(String::new());
+            provider.set_model(model).map_err(|e| e.to_string())?;
+            Ok(Box::new(provider))
+        }
+        "openrouter" => {
+            let api_key = std::env::var("OPENROUTER_API_KEY")
+                .map_err(|_| "OPENROUTER_API_KEY not set".to_string())?;
+            let mut provider = rot_provider::new_openrouter_provider(api_key);
+            provider.set_model(model).map_err(|e| e.to_string())?;
+            Ok(Box::new(provider))
+        }
+        "google" => {
+            let api_key = std::env::var("GOOGLE_API_KEY")
+                .or_else(|_| std::env::var("GEMINI_API_KEY"))
+                .map_err(|_| "GOOGLE_API_KEY (or GEMINI_API_KEY) not set".to_string())?;
+            let mut provider = rot_provider::new_google_provider(api_key);
             provider.set_model(model).map_err(|e| e.to_string())?;
             Ok(Box::new(provider))
         }
@@ -942,9 +965,10 @@ mod tests {
     fn test_render_tools_summary_includes_builtin_tool() {
         let mut tools = rot_tools::ToolRegistry::new();
         rot_tools::register_all(&mut tools);
+        let expected_count = tools.names().len();
 
         let summary = render_tools_summary(&tools);
-        assert!(summary.contains("Loaded tools (8)"));
+        assert!(summary.contains(&format!("Loaded tools ({expected_count})")));
         assert!(summary.contains("read [builtin]"));
     }
 

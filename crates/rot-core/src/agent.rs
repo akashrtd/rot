@@ -16,7 +16,9 @@ use rot_provider::{
     Provider, ProviderContent, ProviderError, ProviderMessage, Request, StopReason, StreamEvent,
     ToolDefinition,
 };
-use rot_tools::{TaskExecution, TaskRequest, TaskRunner, ToolContext, ToolRegistry};
+use rot_tools::{
+    SwarmExecution, SwarmRequest, TaskExecution, TaskRequest, TaskRunner, ToolContext, ToolRegistry,
+};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -587,6 +589,17 @@ impl TaskRunner for AgentTaskRunner {
             child_session_id,
             agent: profile.name.to_string(),
         })
+    }
+
+    async fn run_swarm(&self, request: SwarmRequest) -> Result<SwarmExecution, rot_tools::ToolError> {
+        crate::swarm::run_swarm(
+            self,
+            request,
+            crate::swarm::SwarmConfig {
+                max_concurrency: self.agent.config.task_policy.max_concurrent_tasks,
+            },
+        )
+        .await
     }
 }
 

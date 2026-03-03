@@ -48,6 +48,14 @@ const CONTEXT_WINDOWS: &[(&str, usize)] = &[
     ("claude-sonnet-4-20250514", 200_000),
     ("glm-5", 128_000),
     ("glm-4.7", 128_000),
+    ("gpt-4o", 128_000),
+    ("gpt-4o-mini", 128_000),
+    ("llama3.1", 128_000),
+    ("qwen2.5-coder", 128_000),
+    ("openai/gpt-4o-mini", 128_000),
+    ("anthropic/claude-3.5-sonnet", 200_000),
+    ("gemini-2.5-flash", 1_000_000),
+    ("gemini-2.5-pro", 1_000_000),
 ];
 
 fn get_context_window(model: &str) -> usize {
@@ -91,6 +99,12 @@ pub const AVAILABLE_MODELS: &[(&str, &str)] = &[
     ("zai", "glm-4.7"),
     ("openai", "gpt-4o"),
     ("openai", "gpt-4o-mini"),
+    ("ollama", "llama3.1"),
+    ("ollama", "qwen2.5-coder"),
+    ("openrouter", "openai/gpt-4o-mini"),
+    ("openrouter", "anthropic/claude-3.5-sonnet"),
+    ("google", "gemini-2.5-flash"),
+    ("google", "gemini-2.5-pro"),
 ];
 
 pub const SLASH_COMMANDS: &[(&str, &str)] = &[

@@ -1835,11 +1835,11 @@ Add the highest-value missing CLI tools compared with OpenCode.
 
 #### Acceptance Criteria
 
-- [ ] `question` supports interactive clarification in TUI
-- [ ] `todo*` tools maintain structured task state
-- [ ] `list` provides directory listing without shelling out
-- [ ] `patch` supports deterministic file patch application
-- [ ] `websearch` is gated by network policy
+- [x] `question` supports interactive clarification in TUI
+- [x] `todo*` tools maintain structured task state
+- [x] `list` provides directory listing without shelling out
+- [x] `patch` supports deterministic file patch application
+- [x] `websearch` is gated by network policy
 
 ### T12.2: Experimental Code Intelligence
 
@@ -1854,8 +1854,8 @@ Add richer code-aware tools where they improve reliability.
 
 #### Acceptance Criteria
 
-- [ ] LSP tool is explicitly marked experimental
-- [ ] graceful fallback exists when no language server is available
+- [x] LSP tool is explicitly marked experimental
+- [x] graceful fallback exists when no language server is available
 
 ---
 
@@ -1876,10 +1876,10 @@ Match a broader range of practical deployment environments.
 
 #### Acceptance Criteria
 
-- [ ] Ollama works for local models
-- [ ] OpenRouter works with model selection
-- [ ] Google provider supports streaming and tool use where available
-- [ ] provider tests exist for request shaping and stream parsing
+- [x] Ollama works for local models
+- [x] OpenRouter works with model selection
+- [x] Google provider supports streaming and tool use where available
+- [x] provider tests exist for request shaping and stream parsing
 
 ### T13.2: Provider Registry UX
 
@@ -1895,9 +1895,9 @@ Improve provider and model management from the CLI.
 
 #### Acceptance Criteria
 
-- [ ] `rot providers` lists configured/available providers
-- [ ] `rot models` lists models for the active provider
-- [ ] provider configuration is discoverable from CLI help
+- [x] `rot providers` lists configured/available providers
+- [x] `rot models` lists models for the active provider
+- [x] provider configuration is discoverable from CLI help
 
 ---
 
@@ -1924,9 +1924,9 @@ Expand headless/session workflows for CLI usage.
 
 #### Acceptance Criteria
 
-- [ ] session export/import are round-trip tested
-- [ ] `rot exec --session <id>` resumes prior state
-- [ ] `rot exec --fork` creates a new branch from an existing session
+- [x] session export/import are round-trip tested
+- [x] `rot exec --session <id>` resumes prior state
+- [x] `rot exec --fork` creates a new branch from an existing session
 
 ### T14.2: Headless Service Mode
 
@@ -1941,9 +1941,9 @@ Expose `rot` as a service for automation and embedding.
 
 #### Acceptance Criteria
 
-- [ ] `rot serve` exposes a documented local API
-- [ ] API supports exec-style calls with the same security model
-- [ ] structured outputs match CLI contracts where possible
+- [x] `rot serve` exposes a documented local API
+- [x] API supports exec-style calls with the same security model
+- [x] structured outputs match CLI contracts where possible
 
 ---
 
@@ -1972,10 +1972,10 @@ Add safe, bounded swarm-style orchestration on top of subagents.
 
 #### Acceptance Criteria
 
-- [ ] planner -> worker -> merge workflow exists
-- [ ] orchestration is bounded by concurrency and depth
-- [ ] worker outputs are structured and auditable
-- [ ] swarm is disabled by default unless explicitly enabled
+- [x] planner -> worker -> merge workflow exists
+- [x] orchestration is bounded by concurrency and depth
+- [x] worker outputs are structured and auditable
+- [x] swarm is disabled by default unless explicitly enabled
 
 ---
 
@@ -2055,9 +2055,9 @@ Reject unsupported binary contexts early and provide deterministic preprocessing
 
 #### Acceptance Criteria
 
-- [ ] raw binary files fail with a clear error instead of UTF-8 stream errors
-- [ ] text files load without behavior regression
-- [ ] context metadata includes source path, detected type, and extracted length
+- [x] raw binary files fail with a clear error instead of UTF-8 stream errors
+- [x] text files load without behavior regression
+- [x] context metadata includes source path, detected type, and extracted length
 
 ### T16.2: Built-in Context Extractors
 
@@ -2080,9 +2080,9 @@ Add automatic preprocessing for common context types.
 
 #### Acceptance Criteria
 
-- [ ] PDF context works when `pdftotext` is installed
-- [ ] extractor failure falls back to a clear actionable error
-- [ ] extracted context is cached in a temporary managed artifact
+- [x] PDF context works when `pdftotext` is installed
+- [x] extractor failure falls back to a clear actionable error
+- [x] extracted context is cached in a temporary managed artifact
 
 ---
 
@@ -2115,9 +2115,9 @@ Replace bash-first execution with a Python-first analysis environment.
 
 #### Acceptance Criteria
 
-- [ ] Python REPL can preserve state across iterations
-- [ ] large text contexts can be sliced without shelling out
-- [ ] `FINAL_VAR(name)` returns environment data as the final answer
+- [x] Python REPL can preserve state across iterations
+- [x] large text contexts can be sliced without shelling out
+- [x] `FINAL_VAR(name)` returns environment data as the final answer
 
 ### T17.2: Runtime Selection
 
@@ -2138,9 +2138,9 @@ Support multiple RLM runtime backends while keeping Python as the default.
 
 #### Acceptance Criteria
 
-- [ ] Python is the default runtime
-- [ ] bash runtime remains available behind a flag
-- [ ] runtime-specific tests exist for both backends
+- [x] Python is the default runtime
+- [x] bash runtime remains available behind a flag
+- [x] runtime-specific tests exist for both backends
 
 ---
 
@@ -2168,9 +2168,9 @@ Replace string-tagged `LLM_QUERY` behavior with explicit subcall APIs.
 
 #### Acceptance Criteria
 
-- [ ] subcalls are structured, not regex-rewritten strings
-- [ ] subcall outputs are logged separately
-- [ ] subcalls can target explicit text slices or named variables
+- [x] subcalls are structured, not regex-rewritten strings
+- [x] subcall outputs are logged separately
+- [x] subcalls can target explicit text slices or named variables
 
 ### T18.2: Recursive Depth and Budgeting
 
@@ -2193,9 +2193,9 @@ Make recursion safe and deterministic.
 
 #### Acceptance Criteria
 
-- [ ] recursion depth is capped
-- [ ] subcall count is capped
-- [ ] budget violations fail with explicit errors
+- [x] recursion depth is capped
+- [x] subcall count is capped
+- [x] budget violations fail with explicit errors
 
 ---
 
@@ -2225,9 +2225,9 @@ Persist a structured trace of each RLM run.
 
 #### Acceptance Criteria
 
-- [ ] every RLM run emits a machine-readable trajectory artifact
-- [ ] trajectory can be linked from session metadata
-- [ ] failures preserve the partial trace
+- [x] every RLM run emits a machine-readable trajectory artifact
+- [x] trajectory can be linked from session metadata
+- [x] failures preserve the partial trace
 
 ### T19.2: Usage and Cost Accounting
 
@@ -2242,9 +2242,9 @@ Return meaningful usage numbers for `exec --rlm`.
 
 #### Acceptance Criteria
 
-- [ ] `exec --rlm --json` includes non-zero usage when available
-- [ ] subcall usage is aggregated into total usage
-- [ ] usage reporting is tested for success and partial-failure paths
+- [x] `exec --rlm --json` includes non-zero usage when available
+- [x] subcall usage is aggregated into total usage
+- [x] usage reporting is tested for success and partial-failure paths
 
 ---
 

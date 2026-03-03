@@ -1,17 +1,30 @@
 //! Task tool — delegate work to a subagent.
 
 use crate::error::ToolError;
-use crate::traits::{TaskRequest, Tool, ToolContext, ToolResult};
+use crate::traits::{SwarmRequest, TaskRequest, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TaskParams {
-    /// Subagent name to invoke.
-    pub agent: String,
-    /// Prompt for the delegated task.
+    /// Subagent name to invoke for single-task mode.
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// Prompt for delegated task(s).
     pub prompt: String,
+    /// Enable swarm orchestration mode.
+    #[serde(default)]
+    pub swarm: bool,
+    /// Worker agents for swarm mode.
+    #[serde(default)]
+    pub workers: Vec<String>,
+    /// Optional planner override for swarm mode.
+    #[serde(default)]
+    pub planner_agent: Option<String>,
+    /// Optional merge override for swarm mode.
+    #[serde(default)]
+    pub merge_agent: Option<String>,
 }
 
 pub struct TaskTool;
@@ -54,16 +67,53 @@ impl Tool for TaskTool {
             ToolError::ExecutionError("task tool is unavailable in this runtime".to_string())
         })?;
 
-        let result = runner
-            .run_task(TaskRequest {
-                agent: params.agent,
-                prompt: params.prompt,
-            })
-            .await?;
+        if params.swarm {
+            if params.workers.is_empty() {
+                return Err(ToolError::InvalidParameters(
+                    "swarm mode requires non-empty workers".to_string(),
+                ));
+            }
+
+            let swarm_result = runner
+                .run_swarm(SwarmRequest {
+                    planner_agent: params
+                        .planner_agent
+                        .unwrap_or_else(|| "plan".to_string()),
+                    workers: params.workers,
+                    merge_agent: params
+                        .merge_agent
+                        .unwrap_or_else(|| "default".to_string()),
+                    prompt: params.prompt,
+                })
+                .await?;
+
+            return Ok(ToolResult::success_with_metadata(
+                swarm_result.merged_text,
+                serde_json::json!({
+                    "mode": "swarm",
+                    "planner_output": swarm_result.planner_output,
+                    "workers": swarm_result.workers,
+                }),
+            ));
+        }
+
+        if !params.workers.is_empty() {
+            return Err(ToolError::InvalidParameters(
+                "workers provided but swarm=false; set swarm=true to enable orchestrated delegation"
+                    .to_string(),
+            ));
+        }
+
+        let agent = params.agent.ok_or_else(|| {
+            ToolError::InvalidParameters("agent is required when swarm=false".to_string())
+        })?;
+
+        let result = runner.run_task(TaskRequest { agent, prompt: params.prompt }).await?;
 
         Ok(ToolResult::success_with_metadata(
             result.final_text,
             serde_json::json!({
+                "mode": "single",
                 "agent": result.agent,
                 "child_session_id": result.child_session_id,
             }),
@@ -74,7 +124,7 @@ impl Tool for TaskTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::traits::{TaskExecution, TaskRunner};
+    use crate::traits::{SwarmExecution, SwarmRequest, TaskExecution, TaskRunner, SwarmWorkerResult};
     use async_trait::async_trait;
     use std::sync::Arc;
 
@@ -87,6 +137,22 @@ mod tests {
                 final_text: format!("handled by {}", request.agent),
                 child_session_id: Some("child-123".to_string()),
                 agent: request.agent,
+            })
+        }
+
+        async fn run_swarm(&self, request: SwarmRequest) -> Result<SwarmExecution, ToolError> {
+            Ok(SwarmExecution {
+                planner_output: format!("plan by {}", request.planner_agent),
+                merged_text: "merged swarm output".to_string(),
+                workers: request
+                    .workers
+                    .into_iter()
+                    .map(|agent| SwarmWorkerResult {
+                        final_text: format!("output from {}", agent),
+                        child_session_id: Some(format!("child-{}", agent)),
+                        agent,
+                    })
+                    .collect(),
             })
         }
     }
@@ -109,6 +175,33 @@ mod tests {
         assert!(!result.is_error);
         assert_eq!(result.output, "handled by review");
         assert_eq!(result.metadata["child_session_id"], "child-123");
+        assert_eq!(result.metadata["mode"], "single");
+    }
+
+    #[tokio::test]
+    async fn test_task_swarm_executes_when_enabled() {
+        let ctx = ToolContext {
+            task_runner: Some(Arc::new(MockTaskRunner)),
+            ..Default::default()
+        };
+
+        let result = TaskTool
+            .execute(
+                serde_json::json!({
+                    "swarm": true,
+                    "workers": ["review", "explore"],
+                    "planner_agent": "plan",
+                    "merge_agent": "default",
+                    "prompt": "analyze this change set"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.output, "merged swarm output");
+        assert_eq!(result.metadata["mode"], "swarm");
+        assert_eq!(result.metadata["workers"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]

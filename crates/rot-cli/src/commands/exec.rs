@@ -1,11 +1,13 @@
 //! Single-shot exec command.
 
-use rot_core::{Agent, AgentConfig, AgentRegistry, ApprovalPolicy, ContentBlock, Message, RuntimeSecurityConfig, SandboxMode};
-use rot_provider::{AnthropicProvider, Provider, new_openai_provider, new_zai_provider};
-use rot_session::SessionStore;
+use rot_core::{
+    Agent, AgentConfig, AgentRegistry, ApprovalPolicy, ContentBlock, Message, MessageId, Role,
+    RuntimeSecurityConfig, SandboxMode,
+};
+use rot_session::{SessionEntry, SessionStore, entry_id as session_entry_id};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
@@ -44,13 +46,16 @@ pub async fn run(
     model: Option<&str>,
     provider_name: &str,
     agent_name: Option<&str>,
+    resume_session_id: Option<&str>,
+    fork: bool,
     rlm: bool,
     context_path: Option<&str>,
+    rlm_runtime: Option<rot_rlm::RlmRuntimeKind>,
     runtime_security: RuntimeSecurityConfig,
     options: ExecOptions,
 ) -> anyhow::Result<()> {
     let started = Instant::now();
-    let provider = create_provider(provider_name, model)?;
+    let provider = crate::provider_factory::create_provider(provider_name, model, true)?;
     let agent_profile = AgentRegistry::resolve(agent_name)?;
     let provider_label = provider.name().to_string();
     let model_label = provider.current_model().to_string();
@@ -68,25 +73,103 @@ pub async fn run(
 
     let session_store = SessionStore::new();
     let cwd = std::env::current_dir()?;
-    let session = session_store.create(&cwd, &model_label, &provider_label).await?;
+    let (target_session_id, existing_entry_ids, mut messages) = if let Some(source_id) = resume_session_id
+    {
+        let source_session = session_store
+            .load(&cwd, source_id)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to load session '{source_id}': {e}"))?;
+        let source_messages = messages_from_session_entries(&source_session.entries)?;
+
+        if fork {
+            let child = session_store
+                .create_child(
+                    &cwd,
+                    &model_label,
+                    &provider_label,
+                    source_id,
+                    None,
+                    Some(agent_profile.name),
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to fork session '{source_id}': {e}"))?;
+            let existing = child
+                .entries
+                .iter()
+                .map(|entry| session_entry_id(entry).to_string())
+                .collect::<HashSet<_>>();
+            (child.id, existing, source_messages)
+        } else {
+            let existing = source_session
+                .entries
+                .iter()
+                .map(|entry| session_entry_id(entry).to_string())
+                .collect::<HashSet<_>>();
+            (source_session.id, existing, source_messages)
+        }
+    } else {
+        if fork {
+            return Err(anyhow::anyhow!("--fork requires --session <ID>"));
+        }
+        let session = session_store
+            .create(&cwd, &model_label, &provider_label)
+            .await?;
+        let existing = session
+            .entries
+            .iter()
+            .map(|entry| session_entry_id(entry).to_string())
+            .collect::<HashSet<_>>();
+        (session.id, existing, Vec::new())
+    };
+
     let agent = std::sync::Arc::new(
-        Agent::new(provider, tools, config, runtime_security.clone()).with_session_id(session.id),
+        Agent::new(provider, tools, config, runtime_security.clone())
+            .with_session_id(target_session_id.clone()),
     );
 
     if rlm {
+        if resume_session_id.is_some() || fork {
+            return Err(anyhow::anyhow!(
+                "--session/--fork are not supported with --rlm in this release"
+            ));
+        }
         let ctx_path =
             context_path.ok_or_else(|| anyhow::anyhow!("--context is required when using --rlm"))?;
-        let config = rot_rlm::RlmConfig::default();
+        let mut config = rot_rlm::RlmConfig::default();
+        if let Some(runtime) = rlm_runtime {
+            config.runtime = runtime;
+        }
+        let runtime_label = format!("{:?}", config.runtime).to_ascii_lowercase();
         let mut engine = rot_rlm::RlmEngine::new(config, agent.clone());
-        let final_text = engine.process(prompt, ctx_path).await?;
+        let report = engine.process_with_report(prompt, ctx_path).await?;
+        let trajectory_path = report.trajectory_path.display().to_string();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let trajectory_entry = SessionEntry::Artifact {
+            id: format!("artifact:rlm-trajectory:{ts}"),
+            timestamp: ts,
+            kind: "rlm_trajectory".to_string(),
+            path: trajectory_path.clone(),
+            metadata: serde_json::json!({
+                "runtime": runtime_label,
+                "context_path": ctx_path,
+                "subcalls": report.usage.subcall_count,
+            }),
+        };
+        session_store
+            .append_by_id(&cwd, &target_session_id, trajectory_entry)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to append trajectory metadata: {e}"))?;
         let elapsed_ms = started.elapsed().as_millis();
         let data = ExecOutputData {
                 status: "ok".to_string(),
-                final_text,
+                final_text: report.final_text,
                 tool_calls: Vec::new(),
                 usage: UsageSummary {
-                    input_tokens: 0,
-                    output_tokens: 0,
+                    input_tokens: report.usage.input_tokens,
+                    output_tokens: report.usage.output_tokens,
                 },
                 elapsed_ms,
                 error: None,
@@ -94,12 +177,12 @@ pub async fn run(
                 model: model_label,
                 sandbox_mode: sandbox_mode_label,
                 approval_policy: approval_policy_label,
+                trajectory_path: Some(trajectory_path),
             };
         maybe_validate_schema(options.output_schema.as_deref(), &data.final_text, &options, &data)?;
         return emit_exec_output(&options, &data, &[]);
     }
 
-    let mut messages: Vec<Message> = Vec::new();
     let response = match agent.process(&mut messages, prompt).await {
         Ok(resp) => resp,
         Err(err) => {
@@ -118,6 +201,7 @@ pub async fn run(
                 model: model_label,
                 sandbox_mode: sandbox_mode_label,
                 approval_policy: approval_policy_label,
+                trajectory_path: None,
             };
             emit_exec_output(&options, &data, &[])?;
             return Err(anyhow::Error::new(ExecExitError {
@@ -126,6 +210,15 @@ pub async fn run(
             }));
         }
     };
+
+    persist_session_delta(
+        &session_store,
+        &cwd,
+        &target_session_id,
+        &messages,
+        &existing_entry_ids,
+    )
+    .await?;
 
     let elapsed_ms = started.elapsed().as_millis();
     let final_text = extract_text_from_message(&response);
@@ -157,6 +250,7 @@ pub async fn run(
         model: model_label,
         sandbox_mode: sandbox_mode_label,
         approval_policy: approval_policy_label,
+        trajectory_path: None,
     };
 
     maybe_validate_schema(options.output_schema.as_deref(), &data.final_text, &options, &data)?;
@@ -258,6 +352,7 @@ struct ExecOutputData {
     model: String,
     sandbox_mode: String,
     approval_policy: String,
+    trajectory_path: Option<String>,
 }
 
 fn emit_exec_output(
@@ -291,6 +386,7 @@ fn emit_exec_output(
                 "usage": data.usage,
                 "elapsed_ms": data.elapsed_ms,
                 "error": data.error,
+                "trajectory_path": data.trajectory_path,
             }))?
         );
         return Ok(());
@@ -306,6 +402,7 @@ fn emit_exec_output(
                 "usage": data.usage,
                 "elapsed_ms": data.elapsed_ms,
                 "error": data.error,
+                "trajectory_path": data.trajectory_path,
             }))?
         );
         return Ok(());
@@ -376,6 +473,116 @@ fn extract_text_from_message(msg: &Message) -> String {
         .join("")
 }
 
+fn messages_to_session_entries(messages: &[Message]) -> Result<Vec<SessionEntry>, serde_json::Error> {
+    let mut entries = Vec::new();
+
+    for message in messages {
+        entries.push(SessionEntry::Message {
+            id: message.id.to_string(),
+            parent_id: message.parent_id.as_ref().map(ToString::to_string),
+            timestamp: message.timestamp,
+            role: message.role.to_string(),
+            content: serde_json::to_value(&message.content)?,
+        });
+
+        for (idx, block) in message.content.iter().enumerate() {
+            match block {
+                ContentBlock::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => entries.push(SessionEntry::ToolCall {
+                    id: id.clone(),
+                    parent_id: message.id.to_string(),
+                    timestamp: message.timestamp,
+                    name: name.clone(),
+                    arguments: arguments.clone(),
+                }),
+                ContentBlock::ToolResult {
+                    tool_call_id,
+                    content,
+                    is_error,
+                    ..
+                } => entries.push(SessionEntry::ToolResult {
+                    id: format!("{}:tool_result:{idx}", message.id),
+                    call_id: tool_call_id.clone(),
+                    timestamp: message.timestamp,
+                    output: content.clone(),
+                    is_error: *is_error,
+                }),
+                ContentBlock::Text { .. }
+                | ContentBlock::Image { .. }
+                | ContentBlock::Thinking { .. } => {}
+            }
+        }
+    }
+
+    Ok(entries)
+}
+
+async fn persist_session_delta(
+    store: &SessionStore,
+    cwd: &std::path::Path,
+    session_id: &str,
+    messages: &[Message],
+    existing_entry_ids: &HashSet<String>,
+) -> anyhow::Result<()> {
+    let entries = messages_to_session_entries(messages)
+        .map_err(|e| anyhow::anyhow!("failed to serialize session transcript: {e}"))?;
+    for entry in entries {
+        let id = session_entry_id(&entry).to_string();
+        if existing_entry_ids.contains(&id) {
+            continue;
+        }
+        store
+            .append_by_id(cwd, session_id, entry)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to append session entry: {e}"))?;
+    }
+    Ok(())
+}
+
+fn messages_from_session_entries(entries: &[SessionEntry]) -> anyhow::Result<Vec<Message>> {
+    let mut messages = Vec::new();
+    for entry in entries {
+        let SessionEntry::Message {
+            id,
+            parent_id,
+            timestamp,
+            role,
+            content,
+        } = entry
+        else {
+            continue;
+        };
+
+        let role = parse_role(role)?;
+        let content: Vec<ContentBlock> = serde_json::from_value(content.clone())
+            .map_err(|e| anyhow::anyhow!("failed to parse message content for '{}': {e}", id))?;
+
+        messages.push(Message {
+            id: MessageId::from_string(id.clone()),
+            role,
+            content,
+            timestamp: *timestamp,
+            parent_id: parent_id
+                .as_ref()
+                .map(|parent| MessageId::from_string(parent.clone())),
+        });
+    }
+    Ok(messages)
+}
+
+fn parse_role(role: &str) -> anyhow::Result<Role> {
+    match role {
+        "user" => Ok(Role::User),
+        "assistant" => Ok(Role::Assistant),
+        "tool" => Ok(Role::Tool),
+        "system" => Ok(Role::System),
+        other => Err(anyhow::anyhow!("unknown session message role '{}'", other)),
+    }
+}
+
 fn sandbox_mode_label(mode: SandboxMode) -> &'static str {
     match mode {
         SandboxMode::ReadOnly => "read-only",
@@ -389,54 +596,6 @@ fn approval_policy_label(policy: ApprovalPolicy) -> &'static str {
         ApprovalPolicy::Untrusted => "untrusted",
         ApprovalPolicy::OnRequest => "on-request",
         ApprovalPolicy::Never => "never",
-    }
-}
-
-fn create_provider(provider_name: &str, model: Option<&str>) -> anyhow::Result<Box<dyn Provider>> {
-    match provider_name {
-        "anthropic" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-                anyhow::anyhow!(
-                    "ANTHROPIC_API_KEY not set. Set it with:\n  \
-                     export ANTHROPIC_API_KEY=your-key-here"
-                )
-            })?;
-            let mut provider = AnthropicProvider::new(api_key);
-            if let Some(m) = model {
-                provider.set_model(m).map_err(|e| anyhow::anyhow!("{e}"))?;
-            }
-            Ok(Box::new(provider))
-        }
-        "zai" => {
-            let api_key = std::env::var("ZAI_API_KEY").map_err(|_| {
-                anyhow::anyhow!(
-                    "ZAI_API_KEY not set. Set it with:\n  \
-                     export ZAI_API_KEY=your-key-here\n\n\
-                     Get your key from https://z.ai"
-                )
-            })?;
-            let mut provider = new_zai_provider(api_key);
-            if let Some(m) = model {
-                provider.set_model(m).map_err(|e| anyhow::anyhow!("{e}"))?;
-            }
-            Ok(Box::new(provider))
-        }
-        "openai" => {
-            let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
-                anyhow::anyhow!(
-                    "OPENAI_API_KEY not set. Set it with:\n  \
-                     export OPENAI_API_KEY=your-key-here"
-                )
-            })?;
-            let mut provider = new_openai_provider(api_key);
-            if let Some(m) = model {
-                provider.set_model(m).map_err(|e| anyhow::anyhow!("{e}"))?;
-            }
-            Ok(Box::new(provider))
-        }
-        other => Err(anyhow::anyhow!(
-            "Unknown provider: {other}. Available: anthropic, zai, openai"
-        )),
     }
 }
 

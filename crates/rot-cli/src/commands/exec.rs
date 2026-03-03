@@ -143,15 +143,13 @@ pub async fn run(
                 "RLM is blocked in danger-full-access mode unless --allow-unsafe-rlm is set."
             ));
         }
-        let mut config = rot_rlm::RlmConfig::default();
-        config.runtime_security = runtime_security.clone();
-        if let Some(runtime) = rlm_runtime {
-            config.runtime = runtime;
-        }
-        if let Some(isolation) = rlm_isolation {
-            config.isolation = isolation;
-        }
-        config.docker_image = rlm_docker_image;
+        let config = rot_rlm::RlmConfig {
+            runtime_security: runtime_security.clone(),
+            runtime: rlm_runtime.unwrap_or_default(),
+            isolation: rlm_isolation.unwrap_or_default(),
+            docker_image: rlm_docker_image,
+            ..Default::default()
+        };
         let runtime_label = format!("{:?}", config.runtime).to_ascii_lowercase();
         let mut engine = rot_rlm::RlmEngine::new(config, agent.clone());
         let report = engine.process_with_report(prompt, ctx_path).await?;

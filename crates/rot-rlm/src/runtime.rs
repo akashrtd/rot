@@ -9,35 +9,25 @@ use rot_core::{RuntimeSecurityConfig, SandboxMode as CoreSandboxMode};
 use rot_sandbox::{SandboxMode, SandboxPolicy};
 
 /// Runtime backend used by RLM execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RlmRuntimeKind {
     /// Python runtime (default).
+    #[default]
     Python,
     /// Legacy bash runtime.
     Bash,
 }
 
-impl Default for RlmRuntimeKind {
-    fn default() -> Self {
-        Self::Python
-    }
-}
-
 /// Process isolation backend for RLM runtime subprocesses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum RlmIsolationKind {
     /// Use local host subprocesses with OS sandbox policy.
+    #[default]
     Local,
     /// Use a Docker container as process boundary.
     Docker,
-}
-
-impl Default for RlmIsolationKind {
-    fn default() -> Self {
-        Self::Local
-    }
 }
 
 /// Effective process runtime policy used by REPL environments.

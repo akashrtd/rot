@@ -286,13 +286,13 @@ fn build_snippets(
         let start = idx.saturating_sub(before_context);
         let end = (idx + after_context + 1).min(lines.len());
 
-        for line_no in start..end {
+        for (line_no, line) in lines.iter().enumerate().take(end).skip(start) {
             if seen_lines.insert(line_no) {
                 snippets.push(format!(
                     "{}:{}:{}",
                     rel_path,
                     line_no + 1,
-                    lines[line_no]
+                    line
                 ));
             }
         }

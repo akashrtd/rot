@@ -53,11 +53,16 @@ rot exec "read the README.md and summarize it"
 rot --provider zai exec "list all Rust files"
 rot exec --rlm --context ./large_spec.pdf "extract the core requirements"
 rot exec --rlm --rlm-runtime bash --context ./large_spec.pdf "use legacy bash runtime"
+rot exec --rlm --rlm-isolation docker --rlm-docker-image python:3.11-slim --context ./large_spec.pdf "run in docker"
 ```
 
 Runs one prompt, prints the response, and exits.
 
 RLM context preprocessing supports text, JSON, CSV, HTML, and PDF (`pdftotext` required for PDF).
+
+Safety note:
+- In `danger-full-access` mode (`--yolo`), RLM requires explicit opt-in:
+  - `--allow-unsafe-rlm`
 
 ### Session Management
 

@@ -1464,7 +1464,7 @@ Create integration tests for full workflow.
 
 #### Verification
 
-- [ ] `cargo test` passes all integration tests
+- [x] `cargo test` passes all integration tests
 
 ---
 
@@ -1488,8 +1488,8 @@ Create user documentation.
 
 #### Verification
 
-- [ ] All commands documented
-- [ ] Examples work
+- [x] All commands documented
+- [x] Examples work
 
 ---
 
@@ -1509,8 +1509,8 @@ Configure release build and test binaries.
 
 #### Verification
 
-- [ ] `cargo build --release` produces binary < 20MB
-- [ ] Binary starts in < 100ms
+- [x] `cargo build --release` produces binary < 20MB
+- [x] Binary starts in < 100ms
 - [ ] Works on Linux, macOS, Windows
 
 ---

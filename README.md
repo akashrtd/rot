@@ -191,6 +191,20 @@ Exit codes:
 - `1` runtime or tool failure
 - `2` output schema validation failure
 
+## RLM Mode
+
+Use Recursive Language Model mode for large context analysis:
+
+```bash
+rot exec --rlm --context ./spec.pdf "extract requirements"
+rot exec --rlm --rlm-runtime bash --context ./spec.pdf "use bash runtime"
+rot exec --rlm --rlm-isolation docker --rlm-docker-image python:3.11-slim --context ./spec.pdf "run in docker"
+```
+
+RLM safety:
+- RLM inherits sandbox/network policy from the parent command.
+- In danger mode (`--yolo`), add `--allow-unsafe-rlm` to run RLM explicitly.
+
 ## TUI Keybindings
 
 Insert mode:

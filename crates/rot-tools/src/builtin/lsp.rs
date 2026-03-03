@@ -20,7 +20,7 @@ fn default_max_results() -> usize {
 }
 
 /// Types of code-intelligence queries.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum LspAction {
     /// Find definitions for a symbol or query.
@@ -30,13 +30,8 @@ pub enum LspAction {
     /// Lookup hover-like information for a symbol.
     Hover,
     /// Search workspace symbols.
+    #[default]
     Symbols,
-}
-
-impl Default for LspAction {
-    fn default() -> Self {
-        Self::Symbols
-    }
 }
 
 /// Parameters for the experimental LSP tool.

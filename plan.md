@@ -2344,8 +2344,8 @@ Test realistic context types and preprocessing.
 
 #### Acceptance Criteria
 
-- [ ] direct PDF context is covered by tests
-- [ ] invalid UTF-8 regression is permanently prevented
+- [x] direct PDF context is covered by tests
+- [x] invalid UTF-8 regression is permanently prevented
 
 ### T21.3: End-to-End CLI Tests
 
@@ -2368,9 +2368,9 @@ Validate `rot exec --rlm` from the real CLI boundary.
 
 #### Acceptance Criteria
 
-- [ ] `exec --rlm` is tested with structured output modes
-- [ ] schema validation works on RLM outputs
-- [ ] end-to-end tests do not require live provider credentials by default
+- [x] `exec --rlm` is tested with structured output modes
+- [x] schema validation works on RLM outputs
+- [x] end-to-end tests do not require live provider credentials by default
 
 ---
 

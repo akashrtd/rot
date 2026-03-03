@@ -8,6 +8,7 @@ pub mod types;
 pub use error::ProviderError;
 pub use providers::anthropic::AnthropicProvider;
 pub use providers::google::new_google_provider;
+pub use providers::mock::new_mock_provider;
 pub use providers::ollama::new_ollama_provider;
 pub use providers::openai::new_openai_provider;
 pub use providers::openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider};

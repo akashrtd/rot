@@ -2,7 +2,7 @@
 
 use rot_provider::{
     AnthropicProvider, Provider, new_google_provider, new_ollama_provider, new_openai_provider,
-    new_openrouter_provider, new_zai_provider,
+    new_openrouter_provider, new_zai_provider, new_mock_provider,
 };
 
 /// Built-in provider metadata.
@@ -46,6 +46,11 @@ pub const BUILTIN_PROVIDERS: &[ProviderDescriptor] = &[
         name: "google",
         api_key_env: Some("GOOGLE_API_KEY"),
         api_key_env_fallback: Some("GEMINI_API_KEY"),
+    },
+    ProviderDescriptor {
+        name: "mock",
+        api_key_env: None,
+        api_key_env_fallback: None,
     },
 ];
 
@@ -93,6 +98,7 @@ pub fn create_provider(
             descriptor_for("google").unwrap(),
             require_credentials,
         )?)),
+        "mock" => Box::new(new_mock_provider(resolve_mock_responses()?)),
         other => {
             return Err(anyhow::anyhow!(
                 "Unknown provider: {other}. Available: {}",
@@ -108,6 +114,22 @@ pub fn create_provider(
     }
 
     Ok(provider)
+}
+
+fn resolve_mock_responses() -> anyhow::Result<Vec<String>> {
+    if let Ok(raw) = std::env::var("ROT_MOCK_RESPONSES") {
+        let parsed: Vec<String> = serde_json::from_str(&raw).map_err(|e| {
+            anyhow::anyhow!("Invalid ROT_MOCK_RESPONSES JSON (expected string array): {e}")
+        })?;
+        if parsed.is_empty() {
+            return Err(anyhow::anyhow!(
+                "ROT_MOCK_RESPONSES must contain at least one scripted response"
+            ));
+        }
+        Ok(parsed)
+    } else {
+        Ok(vec!["```repl\nFINAL('mock')\n```".to_string()])
+    }
 }
 
 fn resolve_api_key(desc: &ProviderDescriptor, require_credentials: bool) -> anyhow::Result<String> {

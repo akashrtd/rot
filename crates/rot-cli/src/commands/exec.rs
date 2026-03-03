@@ -51,6 +51,9 @@ pub async fn run(
     rlm: bool,
     context_path: Option<&str>,
     rlm_runtime: Option<rot_rlm::RlmRuntimeKind>,
+    rlm_isolation: Option<rot_rlm::RlmIsolationKind>,
+    rlm_docker_image: Option<String>,
+    allow_unsafe_rlm: bool,
     runtime_security: RuntimeSecurityConfig,
     options: ExecOptions,
 ) -> anyhow::Result<()> {
@@ -135,10 +138,20 @@ pub async fn run(
         }
         let ctx_path =
             context_path.ok_or_else(|| anyhow::anyhow!("--context is required when using --rlm"))?;
+        if runtime_security.requires_explicit_rlm_opt_in() && !allow_unsafe_rlm {
+            return Err(anyhow::anyhow!(
+                "RLM is blocked in danger-full-access mode unless --allow-unsafe-rlm is set."
+            ));
+        }
         let mut config = rot_rlm::RlmConfig::default();
+        config.runtime_security = runtime_security.clone();
         if let Some(runtime) = rlm_runtime {
             config.runtime = runtime;
         }
+        if let Some(isolation) = rlm_isolation {
+            config.isolation = isolation;
+        }
+        config.docker_image = rlm_docker_image;
         let runtime_label = format!("{:?}", config.runtime).to_ascii_lowercase();
         let mut engine = rot_rlm::RlmEngine::new(config, agent.clone());
         let report = engine.process_with_report(prompt, ctx_path).await?;

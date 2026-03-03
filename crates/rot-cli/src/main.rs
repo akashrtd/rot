@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
                 &cli.provider,
                 cli.agent.as_deref(),
                 security,
+                cli.allow_unsafe_rlm,
             )
             .await?;
         }
@@ -41,6 +42,8 @@ async fn main() -> anyhow::Result<()> {
             rlm,
             ref context,
             rlm_runtime,
+            rlm_isolation,
+            ref rlm_docker_image,
             json,
             final_json,
             ref output_schema,
@@ -62,6 +65,9 @@ async fn main() -> anyhow::Result<()> {
                 rlm,
                 context.as_deref(),
                 rlm_runtime.map(Into::into),
+                rlm_isolation.map(Into::into),
+                rlm_docker_image.clone(),
+                cli.allow_unsafe_rlm,
                 security,
                 options,
             )

@@ -14,6 +14,7 @@ tracing = { workspace = true }
 regex = "1.10"
 rot-provider = { version = "0.1.0", path = "../rot-provider" }
 rot-core = { version = "0.1.0", path = "../rot-core" }
+rot-sandbox = { version = "0.1.0", path = "../rot-sandbox" }
 ulid = "1"
 blake3 = { workspace = true }
 anyhow.workspace = true

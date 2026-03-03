@@ -1,7 +1,7 @@
 //! Configuration for RLM execution.
 
-use crate::runtime::RlmRuntimeKind;
-use rot_core::Agent;
+use crate::runtime::{RlmIsolationKind, RlmRuntimeKind};
+use rot_core::{Agent, ApprovalPolicy, RuntimeSecurityConfig, SandboxMode};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +17,8 @@ pub struct RlmConfig {
     pub on_progress: Option<Arc<dyn Fn(String) + Send + Sync>>,
     /// Runtime backend.
     pub runtime: RlmRuntimeKind,
+    /// Process isolation mode.
+    pub isolation: RlmIsolationKind,
     /// Maximum nested SUBLM recursion depth.
     pub max_subcall_depth: usize,
     /// Maximum number of SUBLM calls per run.
@@ -31,6 +33,10 @@ pub struct RlmConfig {
     pub trajectory_dir: Option<PathBuf>,
     /// Max chars persisted per trace field.
     pub trace_max_chars: usize,
+    /// Effective runtime security inherited from parent command.
+    pub runtime_security: RuntimeSecurityConfig,
+    /// Docker image used when `isolation=docker`.
+    pub docker_image: Option<String>,
 }
 
 impl std::fmt::Debug for RlmConfig {
@@ -39,6 +45,7 @@ impl std::fmt::Debug for RlmConfig {
             .field("max_iterations", &self.max_iterations)
             .field("max_timeout", &self.max_timeout)
             .field("runtime", &self.runtime)
+            .field("isolation", &self.isolation)
             .field("max_subcall_depth", &self.max_subcall_depth)
             .field("max_subcalls", &self.max_subcalls)
             .field("subcall_timeout", &self.subcall_timeout)
@@ -46,6 +53,8 @@ impl std::fmt::Debug for RlmConfig {
             .field("subcall_agent", &self.subcall_agent.as_ref().map(|_| "<agent>"))
             .field("trajectory_dir", &self.trajectory_dir)
             .field("trace_max_chars", &self.trace_max_chars)
+            .field("runtime_security", &self.runtime_security)
+            .field("docker_image", &self.docker_image)
             .finish()
     }
 }
@@ -57,6 +66,7 @@ impl Default for RlmConfig {
             max_timeout: Some(Duration::from_secs(300)),
             on_progress: None,
             runtime: RlmRuntimeKind::Python,
+            isolation: RlmIsolationKind::Local,
             max_subcall_depth: 2,
             max_subcalls: 16,
             subcall_timeout: Duration::from_secs(45),
@@ -64,6 +74,12 @@ impl Default for RlmConfig {
             subcall_agent: None,
             trajectory_dir: None,
             trace_max_chars: 12_000,
+            runtime_security: RuntimeSecurityConfig {
+                approval_policy: ApprovalPolicy::Never,
+                sandbox_mode: SandboxMode::DangerFullAccess,
+                sandbox_network_access: true,
+            },
+            docker_image: None,
         }
     }
 }

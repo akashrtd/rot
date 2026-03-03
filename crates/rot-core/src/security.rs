@@ -38,3 +38,20 @@ pub struct RuntimeSecurityConfig {
     /// Whether outbound network access is permitted.
     pub sandbox_network_access: bool,
 }
+
+impl RuntimeSecurityConfig {
+    /// Returns true when runtime has no filesystem sandbox restrictions.
+    pub fn is_danger_full_access(&self) -> bool {
+        self.sandbox_mode == SandboxMode::DangerFullAccess
+    }
+
+    /// Effective network access after considering danger mode.
+    pub fn effective_network_access(&self) -> bool {
+        self.sandbox_network_access || self.is_danger_full_access()
+    }
+
+    /// Whether RLM danger mode requires explicit opt-in from caller.
+    pub fn requires_explicit_rlm_opt_in(&self) -> bool {
+        self.is_danger_full_access()
+    }
+}

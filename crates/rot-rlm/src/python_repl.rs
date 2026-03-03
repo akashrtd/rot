@@ -1,18 +1,19 @@
 //! Python runtime for RLM iterations.
 
 use crate::repl::ReplResult;
+use crate::runtime::RlmProcessPolicy;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
 /// Persistent Python REPL environment backed by a custom stdin protocol.
 pub struct PythonReplEnv {
     working_dir: PathBuf,
     temp_dir: PathBuf,
     delim: String,
+    process_policy: RlmProcessPolicy,
     process: Option<Child>,
     stdin: Option<ChildStdin>,
     stdout: Option<BufReader<ChildStdout>>,
@@ -28,12 +29,18 @@ impl Default for PythonReplEnv {
 impl PythonReplEnv {
     /// Create a new Python REPL environment.
     pub fn new() -> Self {
+        Self::with_policy(RlmProcessPolicy::default())
+    }
+
+    /// Create a new Python REPL environment with an explicit process policy.
+    pub fn with_policy(process_policy: RlmProcessPolicy) -> Self {
         let temp_dir = std::env::temp_dir().join(format!("rot-py-repl-{}", ulid::Ulid::new()));
         std::fs::create_dir_all(&temp_dir).ok();
         Self {
             working_dir: std::env::current_dir().unwrap_or_default(),
             temp_dir,
             delim: format!("__ROT_PY_DELIM_{}__", ulid::Ulid::new()),
+            process_policy,
             process: None,
             stdin: None,
             stdout: None,
@@ -43,16 +50,13 @@ impl PythonReplEnv {
 
     /// Initialize Python process and helper functions.
     pub async fn init(&mut self, context_path: &str) -> anyhow::Result<()> {
-        let mut cmd = Command::new("python3");
-        cmd.args(["-u", "-c", &harness_script(&self.delim)])
-            .current_dir(&self.working_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| anyhow::anyhow!("Failed to spawn python3: {e}"))?;
+        let mut child = crate::runtime::spawn_runtime_process(
+            "python3",
+            &["-u".to_string(), "-c".to_string(), harness_script(&self.delim)],
+            &self.working_dir,
+            &self.process_policy,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to spawn python runtime: {e}"))?;
 
         self.stdin = Some(
             child

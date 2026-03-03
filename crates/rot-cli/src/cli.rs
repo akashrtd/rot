@@ -3,7 +3,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use rot_core::config::Config;
 use rot_core::security::{ApprovalPolicy, RuntimeSecurityConfig, SandboxMode};
-use rot_rlm::RlmRuntimeKind;
+use rot_rlm::{RlmIsolationKind, RlmRuntimeKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ApprovalPolicyArg {
@@ -54,6 +54,21 @@ impl From<RlmRuntimeArg> for RlmRuntimeKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RlmIsolationArg {
+    Local,
+    Docker,
+}
+
+impl From<RlmIsolationArg> for RlmIsolationKind {
+    fn from(value: RlmIsolationArg) -> Self {
+        match value {
+            RlmIsolationArg::Local => RlmIsolationKind::Local,
+            RlmIsolationArg::Docker => RlmIsolationKind::Docker,
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "rot", version, about = "Recursive Operations Tool — AI coding agent")]
 pub struct Cli {
@@ -72,6 +87,10 @@ pub struct Cli {
     /// Enable verbose logging.
     #[arg(short, long, global = true)]
     pub verbose: bool,
+
+    /// Explicitly allow RLM execution in danger-full-access mode.
+    #[arg(long, global = true)]
+    pub allow_unsafe_rlm: bool,
 
     /// Sandbox mode for tool execution.
     #[arg(long, global = true, value_enum)]
@@ -131,6 +150,14 @@ pub enum Commands {
         /// Runtime backend for RLM execution.
         #[arg(long = "rlm-runtime", requires = "rlm", value_enum)]
         rlm_runtime: Option<RlmRuntimeArg>,
+
+        /// Process isolation backend for RLM runtime subprocesses.
+        #[arg(long = "rlm-isolation", requires = "rlm", value_enum)]
+        rlm_isolation: Option<RlmIsolationArg>,
+
+        /// Docker image used when --rlm-isolation=docker.
+        #[arg(long = "rlm-docker-image", requires = "rlm")]
+        rlm_docker_image: Option<String>,
 
         /// Emit JSONL events to stdout.
         #[arg(long, conflicts_with = "final_json")]
@@ -398,6 +425,37 @@ mod tests {
         match parsed.command {
             Some(Commands::Exec { rlm_runtime, .. }) => {
                 assert!(matches!(rlm_runtime, Some(super::RlmRuntimeArg::Bash)));
+            }
+            _ => panic!("expected exec"),
+        }
+    }
+
+    #[test]
+    fn test_exec_rlm_isolation_parses() {
+        let parsed = Cli::try_parse_from([
+            "rot",
+            "exec",
+            "analyze",
+            "--rlm",
+            "--context",
+            "ctx.txt",
+            "--rlm-isolation",
+            "docker",
+            "--rlm-docker-image",
+            "python:3.11-slim",
+        ])
+        .unwrap();
+        match parsed.command {
+            Some(Commands::Exec {
+                rlm_isolation,
+                rlm_docker_image,
+                ..
+            }) => {
+                assert!(matches!(
+                    rlm_isolation,
+                    Some(super::RlmIsolationArg::Docker)
+                ));
+                assert_eq!(rlm_docker_image.as_deref(), Some("python:3.11-slim"));
             }
             _ => panic!("expected exec"),
         }

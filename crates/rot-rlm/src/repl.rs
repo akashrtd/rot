@@ -1,8 +1,8 @@
+use crate::runtime::RlmProcessPolicy;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, ChildStderr, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
 pub struct ReplResult {
     pub stdout: String,
@@ -15,6 +15,7 @@ pub struct ReplEnv {
     working_dir: PathBuf,
     temp_dir: PathBuf,
     variables: HashMap<String, String>,
+    process_policy: RlmProcessPolicy,
     
     // Process handles
     process: Option<Child>,
@@ -31,6 +32,10 @@ impl Default for ReplEnv {
 
 impl ReplEnv {
     pub fn new() -> Self {
+        Self::with_policy(RlmProcessPolicy::default())
+    }
+
+    pub fn with_policy(process_policy: RlmProcessPolicy) -> Self {
         let temp_dir = std::env::temp_dir().join(format!("rot-repl-{}", ulid::Ulid::new()));
         std::fs::create_dir_all(&temp_dir).ok();
 
@@ -38,6 +43,7 @@ impl ReplEnv {
             working_dir: std::env::current_dir().unwrap_or_default(),
             temp_dir,
             variables: HashMap::new(),
+            process_policy,
             process: None,
             stdin: None,
             stdout: None,
@@ -47,14 +53,13 @@ impl ReplEnv {
 
     pub async fn init(&mut self, context_path: &str) -> anyhow::Result<()> {
         // Start bash shell for REPL
-        let mut cmd = Command::new("/bin/bash");
-        cmd.args(["--noprofile", "--norc"])
-            .current_dir(&self.working_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let mut child = cmd.spawn()?;
+        let mut child = crate::runtime::spawn_runtime_process(
+            "/bin/bash",
+            &["--noprofile".to_string(), "--norc".to_string()],
+            &self.working_dir,
+            &self.process_policy,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to spawn bash runtime: {e}"))?;
         
         let stdin = child.stdin.take().expect("Failed to open stdin");
         let stdout = child.stdout.take().expect("Failed to open stdout");

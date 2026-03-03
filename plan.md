@@ -2271,9 +2271,9 @@ Run the RLM runtime with explicit isolation modes instead of always using a loca
 
 #### Acceptance Criteria
 
-- [ ] local runtime respects sandbox policy where feasible
-- [ ] docker runtime can execute isolated RLM jobs
-- [ ] runtime failures are surfaced clearly in CLI output
+- [x] local runtime respects sandbox policy where feasible
+- [x] docker runtime can execute isolated RLM jobs
+- [x] runtime failures are surfaced clearly in CLI output
 
 ### T20.2: Safe Defaults
 
@@ -2288,9 +2288,9 @@ Prevent RLM from bypassing the rest of the system’s security model.
 
 #### Acceptance Criteria
 
-- [ ] RLM runtime inherits sandbox/approval defaults from the parent command
-- [ ] dangerous RLM execution requires explicit opt-in
-- [ ] networked extractors/runtime behavior is gated by policy
+- [x] RLM runtime inherits sandbox/approval defaults from the parent command
+- [x] dangerous RLM execution requires explicit opt-in
+- [x] networked extractors/runtime behavior is gated by policy
 
 ---
 
@@ -2320,8 +2320,8 @@ Move beyond REPL-only tests and validate the actual RLM control flow.
 
 #### Acceptance Criteria
 
-- [ ] all core engine branches are covered by unit tests
-- [ ] fake/mock agent can drive engine tests without network
+- [x] all core engine branches are covered by unit tests
+- [x] fake/mock agent can drive engine tests without network
 
 ### T21.2: Context Ingestion Integration Tests
 

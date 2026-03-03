@@ -7,6 +7,7 @@ pub async fn run(
     provider_name: &str,
     agent_name: Option<&str>,
     runtime_security: rot_core::RuntimeSecurityConfig,
+    allow_unsafe_rlm: bool,
 ) -> anyhow::Result<()> {
     let config_store = rot_core::config::ConfigStore::new();
     config_store.hydrate_env();
@@ -40,6 +41,7 @@ pub async fn run(
         agent_profile.name,
         system_prompt,
         runtime_security,
+        allow_unsafe_rlm,
     )
         .await
         .map_err(|e| anyhow::anyhow!("TUI error: {e}"))?;

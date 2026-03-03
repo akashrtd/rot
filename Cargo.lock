@@ -1988,6 +1988,7 @@ dependencies = [
  "regex",
  "rot-core",
  "rot-provider",
+ "rot-sandbox",
  "rot-tools",
  "serde",
  "serde_json",

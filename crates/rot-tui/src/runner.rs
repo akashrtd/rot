@@ -52,6 +52,7 @@ pub async fn run_tui(
     agent_name: &str,
     system_prompt: String,
     runtime_security: rot_core::RuntimeSecurityConfig,
+    allow_unsafe_rlm: bool,
 ) -> std::io::Result<()> {
     // Setup terminal
     enable_raw_mode()?;
@@ -374,15 +375,26 @@ pub async fn run_tui(
                                 let input_owned = prompt_for_run.clone();
                                 let routed_agent_name = routed_agent_name.clone();
                                 let is_rlm = app.rlm_enabled;
+                                let rlm_security = runtime_security.clone();
+                                let allow_unsafe = allow_unsafe_rlm;
                                 let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
                                 tokio::spawn(async move {
                                     let execution_agent = agent_for_run;
                                     if is_rlm {
+                                        if rlm_security.requires_explicit_rlm_opt_in() && !allow_unsafe {
+                                            let _ = tx_clone.send(AgentEvent::Error(
+                                                "RLM is blocked in danger-full-access mode unless --allow-unsafe-rlm is set."
+                                                    .to_string(),
+                                            ));
+                                            return;
+                                        }
+
                                         let rlm_config = rot_rlm::RlmConfig {
                                             on_progress: Some(Arc::new(move |msg: String| {
                                                 let _ = progress_tx.send(AgentEvent::Progress(msg));
                                             })),
+                                            runtime_security: rlm_security,
                                             ..Default::default()
                                         };
                                         

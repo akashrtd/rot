@@ -3,7 +3,7 @@ use crate::context_loader::{LoadedContext, load_context};
 use crate::prompts::RLM_SYSTEM_PROMPT;
 use crate::python_repl::PythonReplEnv;
 use crate::repl::{ReplEnv, ReplResult};
-use crate::runtime::RlmRuntimeKind;
+use crate::runtime::{RlmProcessPolicy, RlmRuntimeKind};
 use crate::subcall::{SubcallRecord, SubcallRequest, parse_subcall_line};
 use crate::trace::{ExecutionTrace, IterationTrace, RlmTrajectory, persist_trajectory, truncate_for_trace};
 use crate::usage::RlmUsage;
@@ -72,9 +72,14 @@ impl RunState {
 impl RlmEngine {
     /// Create a new engine.
     pub fn new(config: RlmConfig, agent: Arc<Agent>) -> Self {
+        let process_policy = RlmProcessPolicy::from_security(
+            &config.runtime_security,
+            config.isolation,
+            config.docker_image.clone(),
+        );
         let runtime = match config.runtime {
-            RlmRuntimeKind::Python => RuntimeEnv::Python(PythonReplEnv::new()),
-            RlmRuntimeKind::Bash => RuntimeEnv::Bash(ReplEnv::new()),
+            RlmRuntimeKind::Python => RuntimeEnv::Python(PythonReplEnv::with_policy(process_policy)),
+            RlmRuntimeKind::Bash => RuntimeEnv::Bash(ReplEnv::with_policy(process_policy)),
         };
         Self {
             config,
@@ -112,7 +117,8 @@ impl RlmEngine {
             prompt: prompt.to_string(),
             context_path: loaded_context.source_path.display().to_string(),
             context_type: loaded_context.detected_type.clone(),
-            runtime: format!("{:?}", self.config.runtime).to_ascii_lowercase(),
+            runtime: format!("{:?}/{:?}", self.config.runtime, self.config.isolation)
+                .to_ascii_lowercase(),
             iterations: Vec::new(),
             subcalls: Vec::new(),
             usage: RlmUsage::default(),
@@ -437,6 +443,9 @@ Context metadata:
 - detected_type: {}
 - extracted_length: {}
 - runtime: {:?}
+- isolation: {:?}
+- sandbox_mode: {:?}
+- network_access: {}
 
 The preprocessed context is available in runtime helpers.
 Begin by running context_preview() and context_length() before deeper analysis."#,
@@ -444,7 +453,10 @@ Begin by running context_preview() and context_length() before deeper analysis."
             context.source_path.display(),
             context.detected_type,
             context.extracted_length(),
-            self.config.runtime
+            self.config.runtime,
+            self.config.isolation,
+            self.config.runtime_security.sandbox_mode,
+            self.config.runtime_security.sandbox_network_access
         )
     }
 }

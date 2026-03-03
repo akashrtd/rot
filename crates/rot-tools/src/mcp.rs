@@ -333,4 +333,13 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text
         let resolved = resolve_server_cwd(dir.path(), Some("servers/fs")).unwrap();
         assert_eq!(resolved, dir.path().join("servers/fs"));
     }
+
+    #[test]
+    fn test_map_mcp_sandbox_error_to_permission_denied() {
+        let err = map_mcp_error(rot_mcp::McpError::Sandbox("network denied".to_string()));
+        match err {
+            ToolError::PermissionDenied(msg) => assert!(msg.contains("network denied")),
+            other => panic!("expected PermissionDenied, got {other:?}"),
+        }
+    }
 }

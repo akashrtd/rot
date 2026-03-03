@@ -924,6 +924,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_mcp_tool_call_is_persisted_in_transcript_flow() {
+        let provider = Box::new(McpFlowProvider {
+            step: StdMutex::new(0),
+        });
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(McpEchoTool));
+
+        let agent = Arc::new(Agent::new(
+            provider,
+            tools,
+            AgentConfig::default(),
+            RuntimeSecurityConfig {
+                approval_policy: crate::security::ApprovalPolicy::Never,
+                ..RuntimeSecurityConfig::default()
+            },
+        ));
+
+        let mut messages = Vec::new();
+        let response = agent.process(&mut messages, "invoke mcp").await.unwrap();
+        assert_eq!(response.text(), "mcp complete");
+
+        let saw_mcp_call = messages.iter().any(|message| {
+            message.content.iter().any(|block| matches!(
+                block,
+                ContentBlock::ToolCall { name, .. } if name == "mcp__fake__echo"
+            ))
+        });
+        assert!(saw_mcp_call, "expected mcp tool call in transcript");
+
+        let saw_mcp_result = messages.iter().any(|message| {
+            message.content.iter().any(|block| match block {
+                ContentBlock::ToolResult {
+                    content,
+                    metadata,
+                    is_error,
+                    ..
+                } => {
+                    !*is_error
+                        && content == "pong"
+                        && metadata["tool_type"] == "mcp"
+                        && metadata["server"] == "fake"
+                }
+                _ => false,
+            })
+        });
+        assert!(saw_mcp_result, "expected normalized mcp tool result");
+    }
+
+    #[tokio::test]
     async fn test_task_controller_enforces_total_budget() {
         let controller = TaskController::new(TaskExecutionPolicy {
             max_total_tasks: 1,
@@ -983,6 +1032,12 @@ mod tests {
         step: StdMutex<usize>,
     }
 
+    struct McpFlowProvider {
+        step: StdMutex<usize>,
+    }
+
+    struct McpEchoTool;
+
     struct ParallelTaskState {
         call_count: AtomicUsize,
         active_subagents: AtomicUsize,
@@ -991,6 +1046,45 @@ mod tests {
 
     struct ParallelTaskProvider {
         state: Arc<ParallelTaskState>,
+    }
+
+    #[async_trait::async_trait]
+    impl rot_tools::Tool for McpEchoTool {
+        fn name(&self) -> &str {
+            "mcp__fake__echo"
+        }
+
+        fn label(&self) -> &str {
+            "mcp__fake__echo"
+        }
+
+        fn description(&self) -> &str {
+            "fake mcp echo tool"
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string" }
+                }
+            })
+        }
+
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+        ) -> Result<rot_tools::ToolResult, rot_tools::ToolError> {
+            Ok(rot_tools::ToolResult {
+                output: "pong".to_string(),
+                metadata: serde_json::json!({
+                    "tool_type": "mcp",
+                    "server": "fake",
+                }),
+                is_error: false,
+            })
+        }
     }
 
     #[async_trait::async_trait]
@@ -1333,6 +1427,68 @@ mod tests {
         }
 
         async fn complete(&self, _: Request) -> Result<rot_provider::Response, ProviderError> {
+            unimplemented!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for McpFlowProvider {
+        fn name(&self) -> &str {
+            "dummy"
+        }
+
+        fn models(&self) -> Vec<rot_provider::ModelInfo> {
+            vec![]
+        }
+
+        fn current_model(&self) -> &str {
+            "dummy"
+        }
+
+        fn set_model(&mut self, _: &str) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        async fn stream(
+            &self,
+            _: Request,
+        ) -> Result<BoxStream<'_, Result<StreamEvent, ProviderError>>, ProviderError> {
+            let mut step = self.step.lock().unwrap();
+            let current = *step;
+            *step += 1;
+            let events = match current {
+                0 => vec![
+                    Ok(StreamEvent::ToolCallStart {
+                        id: "mcp_call_1".to_string(),
+                        name: "mcp__fake__echo".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallDelta {
+                        id: "mcp_call_1".to_string(),
+                        delta: "{\"text\":\"hello\"}".to_string(),
+                    }),
+                    Ok(StreamEvent::ToolCallEnd {
+                        id: "mcp_call_1".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::ToolUse,
+                    }),
+                ],
+                _ => vec![
+                    Ok(StreamEvent::TextDelta {
+                        delta: "mcp complete".to_string(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        reason: StopReason::EndTurn,
+                    }),
+                ],
+            };
+            Ok(stream::iter(events).boxed())
+        }
+
+        async fn complete(
+            &self,
+            _: Request,
+        ) -> Result<rot_provider::Response, ProviderError> {
             unimplemented!()
         }
     }

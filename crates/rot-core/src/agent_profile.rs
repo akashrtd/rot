@@ -38,3 +38,41 @@ impl AgentProfile {
         self.mode == AgentMode::Subagent
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentMode, AgentProfile};
+
+    #[test]
+    fn test_agent_mode_serde_roundtrip() {
+        let json = serde_json::to_string(&AgentMode::Subagent).unwrap();
+        let parsed: AgentMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, AgentMode::Subagent);
+    }
+
+    #[test]
+    fn test_agent_profile_serde_roundtrip() {
+        let profile = AgentProfile {
+            name: "plan",
+            display_name: "Plan",
+            description: "Planning profile",
+            mode: AgentMode::Primary,
+            system_prompt: "You are planner",
+        };
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(json.contains("\"name\":\"plan\""));
+        assert!(json.contains("\"mode\":\"primary\""));
+
+        let parsed: AgentProfile = serde_json::from_str(
+            r#"{
+                "name":"plan",
+                "display_name":"Plan",
+                "description":"Planning profile",
+                "mode":"primary",
+                "system_prompt":"You are planner"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(parsed, profile);
+    }
+}

@@ -1692,10 +1692,10 @@ Introduce a first-class agent model for primary agents and subagents.
 
 #### Acceptance Criteria
 
-- [ ] `rot exec --agent <name>` works
-- [ ] TUI can switch/select agents
-- [ ] default built-in agents exist: `build`, `plan`, `explore`, `review`
-- [ ] agent config is serializable and test-covered
+- [x] `rot exec --agent <name>` works
+- [x] TUI can switch/select agents
+- [x] default built-in agents exist: `build`, `plan`, `explore`, `review`
+- [x] agent config is serializable and test-covered
 
 ### T10.2: Task Tool and Child Sessions
 
@@ -1727,10 +1727,10 @@ Add delegated execution through a first-class `task` tool.
 
 #### Acceptance Criteria
 
-- [ ] parent agent can delegate one subtask and consume the result
-- [ ] child sessions are stored and linked
-- [ ] task execution is traceable in session history
-- [ ] delegated task respects inherited policy by default
+- [x] parent agent can delegate one subtask and consume the result
+- [x] child sessions are stored and linked
+- [x] task execution is traceable in session history
+- [x] delegated task respects inherited policy by default
 
 ### T10.3: Parallel Delegation
 
@@ -1754,10 +1754,10 @@ Allow bounded parallel task execution.
 
 #### Acceptance Criteria
 
-- [ ] one parent can launch multiple subagents concurrently
-- [ ] concurrency is bounded and configurable
-- [ ] partial failures are surfaced clearly
-- [ ] no unbounded recursive spawning
+- [x] one parent can launch multiple subagents concurrently
+- [x] concurrency is bounded and configurable
+- [x] partial failures are surfaced clearly
+- [x] no unbounded recursive spawning
 
 ---
 
@@ -1785,9 +1785,9 @@ Support external tools via MCP.
 
 #### Acceptance Criteria
 
-- [ ] MCP tools can be loaded from config
-- [ ] MCP tool calls appear in the same transcript/audit flow
-- [ ] policy gating works for MCP tools
+- [x] MCP tools can be loaded from config
+- [x] MCP tool calls appear in the same transcript/audit flow
+- [x] policy gating works for MCP tools
 
 ### T11.2: Custom Tools
 
@@ -1810,9 +1810,9 @@ Support user-defined tools without recompiling `rot`.
 
 #### Acceptance Criteria
 
-- [ ] custom tools can be loaded from config
-- [ ] custom tools appear in provider tool definitions
-- [ ] errors and metadata are normalized into `ToolResult`
+- [x] custom tools can be loaded from config
+- [x] custom tools appear in provider tool definitions
+- [x] errors and metadata are normalized into `ToolResult`
 
 ---
 

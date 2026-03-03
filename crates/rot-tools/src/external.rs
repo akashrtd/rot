@@ -246,4 +246,56 @@ mod tests {
 
         assert!(matches!(err, ToolError::ExecutionError(_)));
     }
+
+    #[test]
+    fn test_custom_tools_appear_in_provider_definitions() {
+        let mut registry = crate::ToolRegistry::new();
+        register_custom_tools(
+            &mut registry,
+            &[CustomToolConfig {
+                name: "echo_args".to_string(),
+                description: "Echo args".to_string(),
+                command: "cat \"$ROT_TOOL_ARGS_FILE\"".to_string(),
+                parameters_schema: serde_json::json!({
+                    "type":"object",
+                    "properties":{"path":{"type":"string"}}
+                }),
+                timeout_secs: None,
+            }],
+        )
+        .unwrap();
+
+        let defs = registry.tool_definitions();
+        let def = defs
+            .iter()
+            .find(|d| d["name"] == "echo_args")
+            .expect("custom tool missing from definitions");
+        assert_eq!(def["description"], "Echo args");
+        assert_eq!(def["parameters"]["type"], "object");
+    }
+
+    #[tokio::test]
+    async fn test_custom_tool_error_and_metadata_normalized() {
+        let dir = TempDir::new().unwrap();
+        let tool = CustomCommandTool {
+            config: CustomToolConfig {
+                name: "failer".to_string(),
+                description: "Fail tool".to_string(),
+                command: "echo boom >&2; exit 7".to_string(),
+                parameters_schema: default_schema(),
+                timeout_secs: None,
+            },
+        };
+
+        let result = tool
+            .execute(serde_json::json!({"x":1}), &test_ctx(&dir))
+            .await
+            .unwrap();
+
+        assert!(result.is_error);
+        assert!(result.output.contains("Exit code: 7"));
+        assert!(result.output.contains("STDERR:"));
+        assert_eq!(result.metadata["exit_code"], 7);
+        assert_eq!(result.metadata["tool_type"], "custom_command");
+    }
 }

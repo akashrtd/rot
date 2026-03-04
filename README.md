@@ -1,5 +1,7 @@
 # rot
 
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 > Recursive Operations Tool, a next-generation AI coding agent for the terminal.
 
 ```text
@@ -13,62 +15,11 @@
 ░░░░░   ░░░░░    ░░░░░░░       ░░░░░
 ```
 
-**rot** makes AI-assisted coding accessible to every developer, regardless of their preferred LLM provider or environment constraints. It solves the fundamental limitation of AI context windows through **recursive intelligence**, handling massive codebases and document-heavy sessions with ease.
+**rot** makes AI-assisted coding accessible to every developer, regardless of their preferred LLM provider or environment constraints. It solves the fundamental limitation of AI context windows through recursive intelligence, handling massive codebases and document-heavy sessions with ease.
 
----
+## Quick Start
 
-## ✨ Key Features
-
-- **Zero Setup & No Dependencies:** Shipped as a single, fast Rust binary. No Node.js, Bun, or Python environments to configure. Drop it onto any server or air-gapped machine and go.
-- **Infinite Context via RLM:** The Recursive Language Model (RLM) engine natively processes `10M+` token inputs by allowing the LLM to access, chunk, and summarize data recursively via an internal REPL environment.
-- **Provider Freedom:** Use the AI models you want. `rot` supports **Anthropic**, **OpenAI**, **Google (Gemini)**, **z.ai**, **OpenRouter**, and **Ollama** (for complete local privacy).
-- **Native Performance:** Written entirely in Rust, guaranteeing instant startup times, low idle memory usage, and rock-solid reliability.
-- **Rich Native Tools:** Comes with 16+ built-in semantic file tools (`codesearch`, `lsp`, `grep`, `glob`, `patch`), as well as native support for Custom Bash Tools and the **Model Context Protocol (MCP)**.
-- **Beautiful TUI:** Fully-featured terminal UI with Vim keybindings, side-by-side execution views, and streaming responses.
-
----
-
-## 🚀 Installation
-
-### One-line installer (macOS / Linux)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/akashrtd/rot/main/install.sh | bash
-```
-
-> **Options:**
-> Force reinstall with `ROT_FORCE=1`
-> Select a specific release version with `ROT_VERSION=v0.1.0`
-
-### Build from source
-
-Requires Rust `1.75+`.
-
-```bash
-git clone https://github.com/akashrtd/rot.git
-cd rot
-cargo install --path crates/rot-cli
-```
-
-### Prerequisites
-
-At least one provider API key exported in your environment (unless exclusively using Ollama locally).
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-# OR
-export OPENAI_API_KEY="sk-proj-..."
-# OR
-export GOOGLE_API_KEY="..."
-```
-
----
-
-## 💻 Usage
-
-### Interactive TUI (Chat Mode)
-
-Fire up the beautiful TUI and start pair programming:
+Fire up the TUI and start pair programming:
 
 ```bash
 rot
@@ -82,7 +33,48 @@ rot --provider ollama --model llama3.1
 rot --provider zai
 ```
 
-**TUI Keybindings:**
+## Prerequisites
+
+- Required: Export at least one provider API key in your environment (unless exclusively using Ollama locally).
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+# OR
+export OPENAI_API_KEY="sk-proj-..."
+# OR
+export GOOGLE_API_KEY="..."
+```
+
+## Installation
+
+### One-line installer (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akashrtd/rot/main/install.sh | bash
+```
+
+Options:
+
+- Force reinstall with `ROT_FORCE=1`
+- Select a specific release version with `ROT_VERSION=v0.1.0`
+
+### Build from source
+
+Requires Rust 1.75+.
+
+```bash
+git clone https://github.com/akashrtd/rot.git
+cd rot
+cargo install --path crates/rot-cli
+```
+
+## Usage
+
+### Interactive TUI (Chat Mode)
+
+This mode provides a fully-featured terminal UI with Vim keybindings, side-by-side execution views, and streaming responses.
+
+TUI Keybindings:
 
 - `Enter`: Send message
 - `Shift+Enter`: Newline
@@ -104,18 +96,18 @@ rot --provider anthropic exec "write a unit test for parser.rs"
 
 ### The RLM Engine (Massive Contexts)
 
-When dealing with giant repositories or massive documents, RLM treats standard LLM limits as a thing of the past.
+When dealing with giant repositories or massive documents, RLM treats standard LLM limits as a thing of the past. It natively processes 10M+ token inputs by allowing the LLM to access, chunk, and summarize data recursively via an internal REPL environment.
 
 ```bash
 rot exec --rlm --context ./spec.pdf "extract the core requirements"
 rot exec --rlm --rlm-runtime bash --context ./architecture.md "analyze the design"
 ```
 
-_(Note: PDF processing requires `pdftotext` to be installed on your system)._
+(Note: PDF processing requires `pdftotext` to be installed on your system).
 
 ### Session Management
 
-`rot` saves your sessions efficiently via JSONL. You don't lose context between working days.
+`rot` saves your sessions efficiently via JSONL. You do not lose context between working days.
 
 ```bash
 rot session list             # View recent sessions
@@ -132,9 +124,7 @@ rot session export <ID> ./session.jsonl
 rot serve --host 0.0.0.0 --port 7878
 ```
 
----
-
-## 🛠️ Configuration & MCP
+## Configuration and MCP
 
 Your global configuration lives at `~/.rot/config.json`. This is where you configure security approvals, custom tools, default providers, and MCP servers.
 
@@ -149,7 +139,7 @@ rot --sandbox <read-only|workspace-write|danger-full-access>
 rot --ask-for-approval <untrusted|on-request|never>
 ```
 
-_(Shortcuts for the bold: `rot --yolo` or `rot --full-auto`)_
+(Shortcuts for the bold: `rot --yolo` or `rot --full-auto`)
 
 ### MCP (Model Context Protocol)
 
@@ -168,9 +158,7 @@ _(Shortcuts for the bold: `rot --yolo` or `rot --full-auto`)_
 }
 ```
 
----
-
-## 🏗️ Development
+## Development
 
 `rot` is composed of several localized crates (`rot-core`, `rot-rlm`, `rot-tui`, etc.).
 
@@ -187,10 +175,8 @@ cargo clippy -- -D warnings
 cargo fmt -- --check
 ```
 
-See [AGENTS.md](AGENTS.md) and [architecture.md](architecture.md) for deeper technical contexts if you're looking to contribute!
+See [AGENTS.md](AGENTS.md) and [architecture.md](architecture.md) for deeper technical contexts if you're looking to contribute.
 
----
+## License
 
-## 📜 License
-
-MIT License. See [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

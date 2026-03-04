@@ -69,7 +69,23 @@ impl ConfigStore {
             fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(config)?;
-        fs::write(&self.path, content)
+        
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            use std::io::Write;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&self.path)?;
+            file.write_all(content.as_bytes())
+        }
+        #[cfg(not(unix))]
+        {
+            fs::write(&self.path, content)
+        }
     }
 
     /// Hydrate `rot` environment with configured API keys, optionally overwriting process env

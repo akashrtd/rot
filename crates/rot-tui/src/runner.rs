@@ -116,11 +116,18 @@ pub async fn run_tui(
     }
 
     // Main loop
+    let mut needs_redraw = true;
+
     while app.running {
-        terminal.draw(|frame| app.render(frame))?;
+        if needs_redraw {
+            terminal.draw(|frame| app.render(frame))?;
+            needs_redraw = false;
+        }
 
         // Check for agent completion (non-blocking)
+        let mut handled_agent_event = false;
         while let Ok(event) = rx.try_recv() {
+            handled_agent_event = true;
             match event {
                 AgentEvent::Response {
                     text,
@@ -183,13 +190,22 @@ pub async fn run_tui(
             }
         }
 
+        if handled_agent_event {
+            needs_redraw = true;
+        }
+
         // Animate thinking dots
         if app.state == AppState::Thinking || app.state == AppState::Streaming {
+            let old_tick = app.thinking_tick;
             app.tick();
+            if app.thinking_tick != old_tick {
+                needs_redraw = true;
+            }
         }
 
         match poll_event(Duration::from_millis(80))? {
             TermEvent::Key(key) => {
+                needs_redraw = true;
                 if is_quit(&key) {
                     app.running = false;
                     continue;
@@ -536,6 +552,7 @@ pub async fn run_tui(
                 }
             }
             TermEvent::MouseScroll(delta) => {
+                needs_redraw = true;
                 if delta < 0 {
                     app.auto_scroll = false;
                     app.scroll_offset = app.scroll_offset.saturating_sub((-delta) as u16);
@@ -543,7 +560,9 @@ pub async fn run_tui(
                     app.scroll_offset = app.scroll_offset.saturating_add(delta as u16).min(app.max_scroll);
                 }
             }
-            TermEvent::Resize(_, _) => {}
+            TermEvent::Resize(_, _) => {
+                needs_redraw = true;
+            }
             TermEvent::Tick => {}
         }
     }

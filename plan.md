@@ -181,7 +181,7 @@ rot-session = { path = "crates/rot-session" }
 
 #### Verification
 
-- [ ] `cargo check` passes (workspace compiles with placeholder crates)
+- [x] `cargo check` passes (workspace compiles with placeholder crates)
 - [ ] `tree -L 2` shows correct structure
 
 #### Implementation Notes
@@ -259,8 +259,8 @@ cargo fmt -- --check           # Check formatting
 ````
 
 #### Verification
-- [ ] File exists and is readable
-- [ ] Commands in file are accurate
+- [x] File exists and is readable
+- [x] Commands in file are accurate
 
 ---
 
@@ -278,8 +278,8 @@ Create the foundational error types used across all crates.
 - `crates/rot-core/src/error.rs` - Error definitions
 
 #### Verification
-- [ ] `cargo check --package rot-core` passes
-- [ ] `cargo clippy --package rot-core` passes
+- [x] `cargo check --package rot-core` passes
+- [x] `cargo clippy --package rot-core` passes
 
 #### Implementation Notes
 
@@ -348,9 +348,9 @@ pub struct Message {
 
 #### Verification
 
-- [ ] `cargo check --package rot-core` passes
-- [ ] `cargo test --package rot-core` passes
-- [ ] Add unit tests for `Message::user()` and `Message::assistant()`
+- [x] `cargo check --package rot-core` passes
+- [x] `cargo test --package rot-core` passes
+- [x] Add unit tests for `Message::user()` and `Message::assistant()`
 
 #### Implementation Notes
 
@@ -414,9 +414,9 @@ pub enum StreamEvent {
 
 #### Verification
 
-- [ ] `cargo check --package rot-provider` passes
-- [ ] `cargo clippy --package rot-provider` passes
-- [ ] Add compile-time check that trait is object-safe
+- [x] `cargo check --package rot-provider` passes
+- [x] `cargo clippy --package rot-provider` passes
+- [x] Add compile-time check that trait is object-safe
 
 #### Implementation Notes
 
@@ -475,9 +475,9 @@ pub struct ToolRegistry {
 
 #### Verification
 
-- [ ] `cargo check --package rot-tools` passes
-- [ ] `cargo test --package rot-tools` passes
-- [ ] Add test for registry registration
+- [x] `cargo check --package rot-tools` passes
+- [x] `cargo test --package rot-tools` passes
+- [x] Add test for registry registration
 
 #### Implementation Notes
 
@@ -539,9 +539,9 @@ pub enum SessionEntry {
 
 #### Verification
 
-- [ ] `cargo check --package rot-session` passes
-- [ ] `cargo test --package rot-session` passes
-- [ ] Add serde roundtrip tests
+- [x] `cargo check --package rot-session` passes
+- [x] `cargo test --package rot-session` passes
+- [x] Add serde roundtrip tests
 
 #### Implementation Notes
 
@@ -595,10 +595,10 @@ impl Provider for AnthropicProvider {
 
 #### Verification
 
-- [ ] `cargo check --package rot-provider` passes
-- [ ] `cargo test --package rot-provider` passes
-- [ ] Add integration test with mock server (use `wiremock` crate)
-- [ ] Test streaming parses correctly
+- [x] `cargo check --package rot-provider` passes
+- [x] `cargo test --package rot-provider` passes
+- [x] Add integration test with mock server (use `wiremock` crate)
+- [x] Test streaming parses correctly
 
 #### Implementation Notes
 
@@ -628,8 +628,8 @@ Implement the OpenAI provider with streaming.
 
 #### Verification
 
-- [ ] `cargo check --package rot-provider` passes
-- [ ] `cargo test --package rot-provider` passes
+- [x] `cargo check --package rot-provider` passes
+- [x] `cargo test --package rot-provider` passes
 
 #### Implementation Notes
 
@@ -656,7 +656,7 @@ Implement provider for local Ollama models.
 
 #### Verification
 
-- [ ] `cargo check --package rot-provider` passes
+- [x] `cargo check --package rot-provider` passes
 
 #### Implementation Notes
 
@@ -682,8 +682,8 @@ Implement the Google Gemini/Vertex AI provider with streaming.
 
 #### Verification
 
-- [ ] `cargo check --package rot-provider` passes
-- [ ] `cargo test --package rot-provider` passes
+- [x] `cargo check --package rot-provider` passes
+- [x] `cargo test --package rot-provider` passes
 
 #### Implementation Notes
 
@@ -710,7 +710,7 @@ Implement the OpenRouter provider (OpenAI-compatible API).
 
 #### Verification
 
-- [ ] `cargo check --package rot-provider` passes
+- [x] `cargo check --package rot-provider` passes
 
 #### Implementation Notes
 
@@ -753,9 +753,9 @@ pub struct ReadParams {
 
 #### Verification
 
-- [ ] `cargo test --package rot-tools` passes
-- [ ] Test reading files with offset/limit
-- [ ] Test path traversal prevention
+- [x] `cargo test --package rot-tools` passes
+- [x] Test reading files with offset/limit
+- [x] Test path traversal prevention
 
 #### Implementation Notes
 
@@ -781,9 +781,9 @@ Implement file creation/overwrite tool.
 
 #### Verification
 
-- [ ] `cargo test --package rot-tools` passes
-- [ ] Test creating new files
-- [ ] Test overwriting existing files
+- [x] `cargo test --package rot-tools` passes
+- [x] Test creating new files
+- [x] Test overwriting existing files
 
 ---
 
@@ -815,11 +815,11 @@ pub struct EditParams {
 
 #### Verification
 
-- [ ] `cargo test --package rot-tools` passes
-- [ ] Test single replacement
-- [ ] Test replace_all
-- [ ] Test error when old_string not found
-- [ ] Test error when old_string appears multiple times without replace_all
+- [x] `cargo test --package rot-tools` passes
+- [x] Test single replacement
+- [x] Test replace_all
+- [x] Test error when old_string not found
+- [x] Test error when old_string appears multiple times without replace_all
 
 ---
 
@@ -839,11 +839,11 @@ Implement shell command execution.
 
 #### Verification
 
-- [ ] `cargo test --package rot-tools` passes
-- [ ] Test successful command
-- [ ] Test failed command (is_error = true)
-- [ ] Test timeout handling
-- [ ] Test output truncation
+- [x] `cargo test --package rot-tools` passes
+- [x] Test successful command
+- [x] Test failed command (is_error = true)
+- [x] Test timeout handling
+- [x] Test output truncation
 
 #### Implementation Notes
 
@@ -870,9 +870,9 @@ Implement file pattern matching.
 
 #### Verification
 
-- [ ] `cargo test --package rot-tools` passes
-- [ ] Test `**/*.rs` pattern
-- [ ] Test `.gitignore` awareness
+- [x] `cargo test --package rot-tools` passes
+- [x] Test `**/*.rs` pattern
+- [x] Test `.gitignore` awareness
 
 #### Implementation Notes
 
@@ -897,10 +897,10 @@ Implement content search with regex.
 
 #### Verification
 
-- [ ] `cargo test --package rot-tools` passes
-- [ ] Test basic regex search
-- [ ] Test file pattern filtering
-- [ ] Test context lines (-A, -B, -C)
+- [x] `cargo test --package rot-tools` passes
+- [x] Test basic regex search
+- [x] Test file pattern filtering
+- [x] Test context lines (-A, -B, -C)
 
 #### Implementation Notes
 
@@ -926,10 +926,10 @@ Implement URL fetching.
 
 #### Verification
 
-- [ ] `cargo test --package rot-tools` passes
-- [ ] Test fetching HTML
-- [ ] Test fetching JSON
-- [ ] Test timeout handling
+- [x] `cargo test --package rot-tools` passes
+- [x] Test fetching HTML
+- [x] Test fetching JSON
+- [x] Test timeout handling
 
 ---
 
@@ -979,11 +979,11 @@ pub struct Session {
 
 #### Verification
 
-- [ ] `cargo test --package rot-session` passes
-- [ ] Test session creation
-- [ ] Test session loading
-- [ ] Test entry appending
-- [ ] Test listing sessions
+- [x] `cargo test --package rot-session` passes
+- [x] Test session creation
+- [x] Test session loading
+- [x] Test entry appending
+- [x] Test listing sessions
 
 #### Implementation Notes
 
@@ -1030,10 +1030,10 @@ impl Agent {
 
 #### Verification
 
-- [ ] `cargo test --package rot-core` passes
-- [ ] Test basic message processing
-- [ ] Test tool call execution
-- [ ] Test max iterations limit
+- [x] `cargo test --package rot-core` passes
+- [x] Test basic message processing
+- [x] Test tool call execution
+- [x] Test max iterations limit
 
 #### Implementation Notes
 
@@ -1125,9 +1125,9 @@ impl ContextManager {
 
 #### Verification
 
-- [ ] `cargo test --package rot-rlm` passes
-- [ ] Test storing large content
-- [ ] Test metadata generation
+- [x] `cargo test --package rot-rlm` passes
+- [x] Test storing large content
+- [x] Test metadata generation
 
 ---
 
@@ -1170,9 +1170,9 @@ impl ReplEnv {
 
 #### Verification
 
-- [ ] `cargo test --package rot-rlm` passes
-- [ ] Test code execution
-- [ ] Test helper functions (llm_query stubs)
+- [x] `cargo test --package rot-rlm` passes
+- [x] Test code execution
+- [x] Test helper functions (llm_query stubs)
 
 #### Implementation Notes
 
@@ -1215,10 +1215,10 @@ impl RlmEngine {
 
 #### Verification
 
-- [ ] `cargo test --package rot-rlm` passes
-- [ ] Test with mock provider
-- [ ] Test iteration limit
-- [ ] Test FINAL extraction
+- [x] `cargo test --package rot-rlm` passes
+- [x] Test with mock provider
+- [x] Test iteration limit
+- [x] Test FINAL extraction
 
 #### Implementation Notes
 
@@ -1268,8 +1268,8 @@ pub enum AppState {
 
 #### Verification
 
-- [ ] `cargo check --package rot-tui` passes
-- [ ] Test app creation
+- [x] `cargo check --package rot-tui` passes
+- [x] Test app creation
 
 ---
 
@@ -1290,7 +1290,7 @@ Implement scrollable message display.
 
 #### Verification
 
-- [ ] `cargo check --package rot-tui` passes
+- [x] `cargo check --package rot-tui` passes
 
 ---
 
@@ -1310,7 +1310,7 @@ Implement multi-line input editor.
 
 #### Verification
 
-- [ ] `cargo check --package rot-tui` passes
+- [x] `cargo check --package rot-tui` passes
 
 ---
 
@@ -1330,7 +1330,7 @@ Implement status bar with context info.
 
 #### Verification
 
-- [ ] `cargo check --package rot-tui` passes
+- [x] `cargo check --package rot-tui` passes
 
 ---
 
@@ -1363,7 +1363,7 @@ Implement keyboard event handling.
 
 #### Verification
 
-- [ ] `cargo test --package rot-tui` passes
+- [x] `cargo test --package rot-tui` passes
 
 ---
 
@@ -1397,8 +1397,8 @@ rot --provider anthropic --model claude-sonnet-4
 
 #### Verification
 
-- [ ] `cargo run --package rot-cli -- --help` works
-- [ ] `cargo run --package rot-cli -- chat` starts TUI
+- [x] `cargo run --package rot-cli -- --help` works
+- [x] `cargo run --package rot-cli -- chat` starts TUI
 
 ---
 
@@ -1419,9 +1419,9 @@ Wire together all components for interactive chat.
 
 #### Verification
 
-- [ ] `cargo run --package rot-cli` starts interactive session
-- [ ] Can send message and receive response
-- [ ] Session persists on exit
+- [x] `cargo run --package rot-cli` starts interactive session
+- [x] Can send message and receive response
+- [x] Session persists on exit
 
 ---
 
@@ -1441,7 +1441,7 @@ Implement single-shot execution mode.
 
 #### Verification
 
-- [ ] `cargo run --package rot-cli -- exec "read main.rs"` works
+- [x] `cargo run --package rot-cli -- exec "read main.rs"` works
 
 ---
 
@@ -1573,18 +1573,18 @@ All ─────────────────────────�
 
 ### Before Starting Each Task
 
-- [ ] Read AGENTS.md for project context
-- [ ] Read this plan for task details
-- [ ] Check dependencies are complete
-- [ ] Read referenced architecture.md sections
+- [x] Read AGENTS.md for project context
+- [x] Read this plan for task details
+- [x] Check dependencies are complete
+- [x] Read referenced architecture.md sections
 
 ### After Completing Each Task
 
-- [ ] `cargo check` passes
-- [ ] `cargo test` passes
-- [ ] `cargo clippy -- -D warnings` passes
-- [ ] Commit with message: `feat(crate): description`
-- [ ] Update AGENTS.md with any new patterns/gotchas
+- [x] `cargo check` passes
+- [x] `cargo test` passes
+- [x] `cargo clippy -- -D warnings` passes
+- [x] Commit with message: `feat(crate): description`
+- [x] Update AGENTS.md with any new patterns/gotchas
 
 ### When Stuck
 

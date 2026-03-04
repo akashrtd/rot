@@ -142,6 +142,11 @@ Sessions use JSONL format:
 - Shell commands: `bash -c` on Unix (fallback to `sh -c` if needed), `cmd /C` on Windows
 - Path handling: use `std::path::Path` not string concatenation
 - PTY: `portable-pty` handles cross-platform terminal
+- `SessionStore::new()` writes under OS data directories (`dirs::data_dir()`), so integration tests should set `HOME`/`XDG_DATA_HOME` to isolate artifacts.
+
+### TUI Testing
+- Chat starts with `RLM` enabled; tests that need standard provider flow should send `/rlm` first to toggle it off.
+- Drain PTY output continuously in tests to avoid blocking on terminal buffer backpressure.
 
 ### Serde
 - Use `#[serde(tag = "type")]` for discriminated unions

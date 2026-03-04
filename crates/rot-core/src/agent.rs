@@ -173,6 +173,7 @@ impl Agent {
     ) -> Result<Message, AgentProcessError> {
         // Add user message
         let user_msg = Message::user(user_input);
+        persist_message_to_session(&invocation.session_id, &user_msg).await;
         messages.push(user_msg);
 
         let working_dir = std::env::current_dir().unwrap_or_default();
@@ -285,6 +286,7 @@ impl Agent {
             }
 
             let assistant_msg = Message::assistant(content_blocks);
+            persist_message_to_session(&invocation.session_id, &assistant_msg).await;
             messages.push(assistant_msg);
 
             // If no tool calls, we're done
@@ -364,6 +366,7 @@ impl Agent {
 
             tool_messages.sort_by_key(|(idx, _)| *idx);
             for (_, tool_msg) in tool_messages {
+                persist_message_to_session(&invocation.session_id, &tool_msg).await;
                 messages.push(tool_msg);
             }
 
@@ -655,6 +658,37 @@ fn messages_to_session_entries(messages: &[Message]) -> Result<Vec<SessionEntry>
     }
 
     Ok(entries)
+}
+
+async fn persist_message_to_session(session_id: &str, message: &Message) {
+    if session_id.is_empty() {
+        return;
+    }
+
+    let entries = match messages_to_session_entries(std::slice::from_ref(message)) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::warn!(
+                session_id,
+                error = %error,
+                "failed to serialize message for session persistence"
+            );
+            return;
+        }
+    };
+
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let session_store = SessionStore::new();
+    for entry in entries {
+        if let Err(error) = session_store.append_by_id(&cwd, session_id, entry).await {
+            tracing::warn!(
+                session_id,
+                error = %error,
+                "failed to append message to session transcript"
+            );
+            break;
+        }
+    }
 }
 
 struct TaskController {

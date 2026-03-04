@@ -16,3 +16,6 @@ reqwest = { workspace = true }
 reqwest-eventsource = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+wiremock = "0.6"

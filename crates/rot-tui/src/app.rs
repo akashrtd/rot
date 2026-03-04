@@ -639,23 +639,32 @@ impl App {
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
+        let is_dialog_active = self.state == AppState::Approval
+            || self.state == AppState::Config
+            || self.state == AppState::Agents;
+        let outer_border_color = if is_dialog_active { COLOR_DIM } else { COLOR_ACCENT };
+
         // Thick outer border around entire TUI
         let outer_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(COLOR_ACCENT))
+            .border_style(Style::default().fg(outer_border_color))
             .border_type(ratatui::widgets::BorderType::Thick)
             .title(" rot ")
-            .title_style(Style::default().fg(COLOR_ACCENT).bold());
+            .title_style(Style::default().fg(outer_border_color).bold());
         let inner = outer_block.inner(area);
         frame.render_widget(outer_block, area);
 
-        // Layout: header(1) | messages(flex) | input(3) | footer(1)
+        // Calculate input box height dynamically
+        let input_lines = self.input.split('\n').count() as u16;
+        let input_height = (input_lines + 2).clamp(3, (area.height / 3).max(3));
+
+        // Layout: header(1) | messages(flex) | input(dynamic) | footer(1)
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // Header
                 Constraint::Min(5),   // Messages
-                Constraint::Length(3), // Input
+                Constraint::Length(input_height), // Input
                 Constraint::Length(1), // Footer (provider + context + tokens + cost)
             ])
             .split(inner);
@@ -787,12 +796,22 @@ impl App {
                             .style(line_style),
                         );
                     } else {
+                        let mut in_code_block = false;
                         for content_line in content_lines {
                             let mut spans = vec![
                                 Span::styled(" ", Style::default().bg(msg_bg)),
                                 bar_span.clone(),
                             ];
-                            spans.extend(Self::parse_markdown(content_line, content_style));
+                            
+                            if content_line.trim_start().starts_with("```") {
+                                in_code_block = !in_code_block;
+                                spans.push(Span::styled(content_line, Style::default().fg(COLOR_DIM).bg(COLOR_CODE_BG)));
+                            } else if in_code_block {
+                                spans.push(Span::styled(content_line, Style::default().fg(COLOR_CODE_FG).bg(COLOR_CODE_BG)));
+                            } else {
+                                spans.extend(Self::parse_markdown(content_line, content_style));
+                            }
+                            
                             lines.push(Line::from(spans).style(line_style));
                         }
                     }
@@ -859,6 +878,18 @@ impl App {
             .scroll((self.scroll_offset, 0));
 
         frame.render_widget(paragraph, area);
+
+        // Scroll indicators
+        if self.max_scroll > 0 {
+            if self.scroll_offset > 0 {
+                let up_arrow = Paragraph::new(" ▲ ").style(Style::default().fg(COLOR_DIM).bg(COLOR_CODE_BG)).alignment(ratatui::layout::Alignment::Right);
+                frame.render_widget(up_arrow, Rect { x: area.x, y: area.y, width: area.width.saturating_sub(1), height: 1 });
+            }
+            if self.scroll_offset < self.max_scroll {
+                let down_arrow = Paragraph::new(" ▼ ").style(Style::default().fg(COLOR_ACCENT).bold().bg(COLOR_CODE_BG)).alignment(ratatui::layout::Alignment::Right);
+                frame.render_widget(down_arrow, Rect { x: area.x, y: area.y + area.height.saturating_sub(1), width: area.width.saturating_sub(1), height: 1 });
+            }
+        }
     }
 
     // render_context_bar removed — merged into render_footer
@@ -880,9 +911,6 @@ impl App {
             InputMode::Normal => "  ",
         };
 
-        let display_input = self.input.replace('\n', " ↵ ");
-        let input_text = format!("{prompt}{display_input}");
-
         let block = Block::default()
             .borders(Borders::TOP)
             .border_style(Style::default().fg(border_color))
@@ -897,17 +925,33 @@ impl App {
             AppState::Config => Style::default().fg(COLOR_DIM),
         };
 
-        let paragraph = Paragraph::new(input_text).style(style).block(block);
-        frame.render_widget(paragraph, area);
+        let mut lines = Vec::new();
+        for (i, line) in self.input.split('\n').enumerate() {
+            if i == 0 {
+                lines.push(Line::from(vec![
+                    Span::styled(prompt, style),
+                    Span::styled(line.to_string(), style),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", style),
+                    Span::styled(line.to_string(), style),
+                ]));
+            }
+        }
+
+        let input_widget = Paragraph::new(lines).block(block);
+        frame.render_widget(input_widget, area);
 
         // Cursor
         if self.input_mode == InputMode::Insert && self.state == AppState::Idle {
-            let visible_pos: usize = self.input[..self.cursor_pos]
-                .chars()
-                .map(|c| if c == '\n' { 3 } else { 1 }) // ↵  = " ↵ " = 3 chars
-                .sum();
-            let x = area.x + visible_pos as u16 + 3; // +1 padding +2 prompt
-            let y = area.y + 1; // +1 because of TOP border thickness
+            let text_before_cursor = &self.input[..self.cursor_pos];
+            let cursor_y = text_before_cursor.matches('\n').count() as u16;
+            let last_line = text_before_cursor.split('\n').last().unwrap_or("");
+            let cursor_x = last_line.chars().count() as u16;
+
+            let x = area.x + cursor_x + 3; // +1 padding +2 prompt
+            let y = area.y + 1 + cursor_y; // +1 because of TOP border thickness
             frame.set_cursor_position(Position::new(x, y));
         }
     }

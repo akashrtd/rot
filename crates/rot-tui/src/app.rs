@@ -115,7 +115,6 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show help"),
     ("/clear", "Clear conversation"),
     ("/models", "Switch model"),
-    ("/model", "Switch model"),
     ("/rlm", "Toggle RLM"),
     ("/quit", "Exit app"),
     ("/exit", "Exit app"),
@@ -337,7 +336,7 @@ impl App {
             }
             "/children" | "/tree" | "/tools" => false,
             _ if cmd.starts_with("/child ") || cmd.starts_with("/tool ") => false,
-            "/models" | "/model" => {
+            "/models" => {
                 self.state = AppState::Config;
                 self.config_ui_state = ConfigUiState::List(0);
                 true
@@ -1515,7 +1514,7 @@ mod tests {
         let items = app.filtered_slash_commands();
         assert!(app.is_slash_menu_active());
         assert!(items.iter().any(|(cmd, _)| *cmd == "/models"));
-        assert!(items.iter().any(|(cmd, _)| *cmd == "/model"));
+
     }
 
     #[test]

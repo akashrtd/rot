@@ -543,8 +543,23 @@ pub async fn run_tui(
                             KeyCode::Char('j') | KeyCode::Down => {
                                 app.scroll_offset = app.scroll_offset.saturating_add(1).min(app.max_scroll);
                             }
+                            KeyCode::Char('g') => {
+                                // Double 'g' for top
+                                app.auto_scroll = false;
+                                app.scroll_offset = 0;
+                            }
                             KeyCode::Char('G') => {
                                 app.auto_scroll = true;
+                                app.scroll_offset = app.max_scroll;
+                            }
+                            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                app.auto_scroll = false;
+                                let height = terminal.size()?.height;
+                                app.scroll_offset = app.scroll_offset.saturating_sub(height / 2);
+                            }
+                            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                let height = terminal.size()?.height;
+                                app.scroll_offset = app.scroll_offset.saturating_add(height / 2).min(app.max_scroll);
                             }
                             KeyCode::Char('y') => {
                                 if let Some(msg) = app.chat_lines.last() {

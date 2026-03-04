@@ -130,6 +130,26 @@ rot serve --host 0.0.0.0 --port 7878
 
 ---
 
+## Professional Workflow Support
+
+**rot** is designed to fit into high-productivity developer setups.
+
+### 1. Neovim Integration
+
+When running `rot` inside a Neovim terminal (`:terminal`), it automatically detects the `$NVIM` server. The agent gains specialized capabilities:
+
+- **`nvim_read_buffer`**: Directly ingest your active code buffer as context.
+- **`nvim_write_buffer`**: Generate code or refactors and send them directly to your editor.
+
+### 2. Tmux Support
+
+Seamlessly interact with your terminal multiplexer:
+
+- **`tmux_capture_pane`**: The agent can inspect compiler output or logs in adjacent panes.
+- **`tmux_send_keys`**: Automatically trigger test runs or server restarts in other windows.
+
+---
+
 ## Configuration
 
 Your global configuration lives at `~/.rot/config.json`. Here you define API keys, security boundaries, and custom tools.

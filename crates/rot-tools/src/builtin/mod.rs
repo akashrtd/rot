@@ -11,8 +11,10 @@ pub mod patch;
 pub mod question;
 pub mod read;
 pub mod task;
+pub mod tmux;
 pub mod todoread;
 pub mod todowrite;
+pub mod vim;
 pub mod webfetch;
 pub mod websearch;
 pub mod write;
@@ -39,4 +41,8 @@ pub fn register_all(registry: &mut ToolRegistry) {
     registry.register(Arc::new(task::TaskTool));
     registry.register(Arc::new(webfetch::WebFetchTool));
     registry.register(Arc::new(websearch::WebSearchTool));
+    registry.register(Arc::new(tmux::TmuxCaptureTool));
+    registry.register(Arc::new(tmux::TmuxSendKeysTool));
+    registry.register(Arc::new(vim::NvimReadTool));
+    registry.register(Arc::new(vim::NvimWriteTool));
 }

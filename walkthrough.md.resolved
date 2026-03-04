@@ -1,0 +1,337 @@
+# Rot — Full Project Walkthrough
+
+> **Recursive Operations Tool** — A next-generation, open-source AI coding agent for your terminal, built in Rust.
+
+---
+
+## What Is Rot?
+
+Rot is a **terminal-based AI coding assistant** that lets developers pair-program with LLMs directly from the command line. It's comparable to tools like Aider, Claude Code, or Cursor — but runs entirely in your terminal with a custom TUI, supports *any* LLM provider, and introduces a unique **RLM (Recursive Language Model) engine** that can process **10M+ token contexts** by recursively chunking and reasoning over massive documents.
+
+---
+
+## Architecture Overview
+
+Rot is a **Rust workspace** with **11 crates**, ~96 source files, organized by clear separation of concerns:
+
+```
+rot/
+├── crates/
+│   ├── rot-cli          # Binary entry point, CLI arg parsing (clap)
+│   ├── rot-core         # Agent loop, messages, permissions, config, security
+│   ├── rot-provider     # LLM provider abstraction (7 backends)
+│   ├── rot-tools        # 20 built-in tools (file ops, bash, search, etc.)
+│   ├── rot-rlm          # RLM engine (recursive reasoning over massive contexts)
+│   ├── rot-tui          # Terminal UI (ratatui + crossterm)
+│   ├── rot-session      # JSONL session persistence with tree structure
+│   ├── rot-sandbox      # OS-level sandboxing (macOS Seatbelt, Linux bwrap)
+│   ├── rot-serve        # Headless HTTP API server (Axum)
+│   ├── rot-mcp          # Model Context Protocol integration
+│   └── rot-plugin       # Plugin system (future/stub)
+├── Cargo.toml           # Workspace root (v0.1.2, Rust 2021, min 1.75)
+├── architecture.md      # 2700-line technical design document
+├── plan.md              # Task-by-task implementation guide
+├── brainstorm.md        # Research & competitive analysis
+└── pdr.md               # Product requirements document
+```
+
+### Dependency Graph
+
+```mermaid
+graph TD
+    CLI["rot-cli (binary)"] --> Core["rot-core"]
+    CLI --> TUI["rot-tui"]
+    CLI --> Serve["rot-serve"]
+    Core --> Provider["rot-provider"]
+    Core --> Tools["rot-tools"]
+    Core --> Session["rot-session"]
+    Core --> RLM["rot-rlm"]
+    Core --> Plugin["rot-plugin"]
+    Core --> Sandbox["rot-sandbox"]
+    Tools --> MCP["rot-mcp"]
+    RLM --> Provider
+```
+
+---
+
+## Crate-by-Crate Breakdown
+
+### 1. `rot-cli` — Entry Point
+
+| File | Role |
+|------|------|
+| [main.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-cli/src/main.rs) | Tokio [main](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-cli/src/main.rs#12-176), command dispatch, config loading |
+| [cli.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-cli/src/cli.rs) | Clap-based CLI argument definitions |
+| [provider_factory.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-cli/src/provider_factory.rs) | Constructs the right [Provider](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/traits.rs#13-39) from CLI flags |
+| [commands/chat.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-cli/src/commands/chat.rs) | Interactive TUI chat mode |
+| [commands/exec.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-cli/src/commands/exec.rs) | Single-shot execution mode |
+
+**Commands**: [chat](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-tui/src/app.rs#301-309) (default), [exec](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/engine.rs#28-34), [session](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/agent.rs#132-137) (list/tree/resume/export/import), `tools`, `providers`, [models](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/engine.rs#498-508), `serve`.
+
+---
+
+### 2. `rot-core` — Agent Loop & Brain
+
+The heart of the system. Key files:
+
+| File | Role |
+|------|------|
+| [agent.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/agent.rs) | **1538 lines.** The main agent loop: send→stream→parse→tools→repeat |
+| [message.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/message.rs) | `Message`, `ContentBlock` (Text, ToolCall, ToolResult, Thinking, Image), `Role` |
+| [config.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/config.rs) | [Config](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/agent.rs#58-70), `ConfigStore` — reads `~/.rot/config.json` |
+| [security.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/security.rs) | [RuntimeSecurityConfig](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/security.rs#33-41), `ApprovalPolicy`, `SandboxMode` |
+| [permission.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/permission.rs) | Permission checking for tool execution |
+| [agent_profile.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/agent_profile.rs) | `AgentProfile`, `AgentMode` — named agent personas |
+| [agent_registry.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/agent_registry.rs) | Registry of available agent profiles |
+| [swarm.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/swarm.rs) | Multi-agent swarm orchestration |
+| [task_scheduler.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/task_scheduler.rs) | Task delegation and scheduling |
+
+**Agent loop flow**: User Input → build provider context → stream LLM response → parse `StreamEvent`s → if tool calls: check permissions → execute tools → loop back. Max 50 iterations. Supports `EventCallback` for TUI streaming and `ApprovalCallback` for interactive permission prompts.
+
+The agent also supports **task delegation** via [AgentTaskRunner](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/agent.rs#490-496) — sub-agents that can be spawned with their own message history via a `TaskTool`.
+
+---
+
+### 3. `rot-provider` — LLM Provider Abstraction
+
+**Core trait** ([traits.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/traits.rs)):
+```rust
+trait Provider: Send + Sync {
+    fn name(&self) -> &str;
+    fn models(&self) -> Vec<ModelInfo>;
+    fn current_model(&self) -> &str;
+    fn set_model(&mut self, model: &str) -> Result<(), ProviderError>;
+    async fn stream(&self, request: Request) -> Result<BoxStream<StreamEvent>>;
+    async fn complete(&self, request: Request) -> Result<Response>;
+}
+```
+
+**7 provider implementations**:
+
+| Provider | File | Notes |
+|----------|------|-------|
+| Anthropic | [anthropic.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/providers/anthropic.rs) | Native Claude API with thinking support |
+| OpenAI | [openai.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/providers/openai.rs) | GPT-4o, o-series |
+| Google | [google.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/providers/google.rs) | Gemini models (1M context) |
+| Ollama | [ollama.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/providers/ollama.rs) | Local models |
+| OpenRouter | [openrouter.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/providers/openrouter.rs) | OpenRouter API gateway |
+| ZAI | [zai.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/providers/zai.rs) | GLM models |
+| OpenAI-Compat | [openai_compat.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/providers/openai_compat.rs) | Generic OpenAI-compatible endpoints |
+| Mock | [mock.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/providers/mock.rs) | For testing |
+
+All providers normalize to a common `StreamEvent` enum (TextDelta, ToolCallStart, ToolCallDelta, ThinkingDelta, Done, Error, Usage).
+
+---
+
+### 4. `rot-tools` — 20 Built-in Tools
+
+Registered in [builtin/mod.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-tools/src/builtin/mod.rs):
+
+| Tool | Purpose |
+|------|---------|
+| `ReadTool` | Read file contents |
+| `ListTool` | List directory entries |
+| `CodeSearchTool` | Semantic code search |
+| `LspTool` | Language Server Protocol queries |
+| `WriteTool` | Write/create files |
+| `EditTool` | Targeted file edits |
+| `PatchTool` | Apply patches |
+| `QuestionTool` | Ask the user a follow-up question |
+| `TodoReadTool` / `TodoWriteTool` | Persistent task tracking |
+| `BashTool` | Execute shell commands (sandboxed) |
+| `GlobTool` | Find files by glob pattern |
+| `GrepTool` | Search file contents with regex |
+| `TaskTool` | Delegate to a sub-agent |
+| `WebFetchTool` | Fetch URLs |
+| `WebSearchTool` | Web search |
+| `TmuxCaptureTool` / `TmuxSendKeysTool` | Tmux integration |
+| `NvimReadTool` / `NvimWriteTool` | Neovim integration |
+
+Also supports **MCP (Model Context Protocol)** tools via [mcp.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-tools/src/mcp.rs) and **custom external tools** via [external.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-tools/src/external.rs).
+
+Each tool implements the [Tool](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-serve/src/lib.rs#53-57) trait with JSON Schema parameter definitions, async [execute](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/engine.rs#28-34), and structured `ToolResult` output. A `PathGuard` module ([path_guard.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-tools/src/path_guard.rs)) enforces sandbox boundaries.
+
+---
+
+### 5. `rot-rlm` — Recursive Language Model Engine
+
+The standout feature. Key files:
+
+| File | Role |
+|------|------|
+| [engine.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/engine.rs) | Main RLM loop (589 lines) |
+| [repl.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/repl.rs) | Bash REPL environment |
+| [python_repl.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/python_repl.rs) | Python REPL environment |
+| [context.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/context.rs) | External context storage |
+| [context_loader.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/context_loader.rs) | Load contexts from files/PDFs |
+| [subcall.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/subcall.rs) | Sub-LLM call orchestration |
+| [runtime.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/runtime.rs) | Runtime abstraction |
+| [runtime_docker.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/runtime_docker.rs) | Docker-isolated execution |
+| [runtime_local.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/runtime_local.rs) | Local execution |
+| [trace.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/trace.rs) | Execution trajectory tracing |
+| [usage.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/usage.rs) | Token usage tracking |
+| [prompts.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-rlm/src/prompts.rs) | System prompts for RLM mode |
+
+**How RLM works**: Instead of cramming a massive document into one LLM call, RLM stores the context externally in temp files, exposes it as a variable in a REPL (bash or Python), and lets the LLM write code to iteratively chunk, query sub-LLMs, filter, and aggregate — until calling `FINAL(answer)`. Think of it as giving the LLM a programmable workspace to reason recursively over unbounded data.
+
+**Available REPL functions**: `llm_query()`, `llm_query_batched()`, `rlm_query()` (recursive), `rlm_query_batched()`, `SHOW_VARS()`, `FINAL()`, `FINAL_VAR()`.
+
+---
+
+### 6. `rot-sandbox` — OS-Level Sandboxing
+
+[lib.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-sandbox/src/lib.rs) (386 lines):
+
+- **macOS**: Uses `sandbox-exec` with Seatbelt profiles for fine-grained filesystem/network restrictions
+- **Linux**: Uses `bwrap` (bubblewrap) for namespace isolation
+- **Three modes**: `ReadOnly`, `WorkspaceWrite`, `DangerFullAccess`
+- Supports both one-shot command execution and long-lived process spawning
+
+---
+
+### 7. `rot-session` — Session Persistence
+
+- **JSONL format** — one JSON object per line
+- **Tree structure** via [id](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/traits.rs#13-39) and `parent_id` for conversation branching
+- **Operations**: create, load, list, export, import, tree visualization
+- Sessions stored under OS data directories (`dirs::data_dir()`)
+- Auto-saved on each message
+
+---
+
+### 8. `rot-tui` — Terminal User Interface
+
+[app.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-tui/src/app.rs) (1720 lines) — main rendering and state:
+
+- Built on **ratatui** + **crossterm**
+- Tokyo Night-inspired color palette
+- Vim keybindings (Normal/Insert mode)
+- Streaming markdown rendering with inline code, bold, italic
+- **Features**: model selector dialog, agent selector, slash commands, RLM toggle, access mode toggle, context window tracker, clipboard support, timer, token counter
+- **Slash commands**: `/tools`, `/rlm`, `/config`, `/agents`, `/help`, `/clear`, `/session`, `/copy`, `/quit`
+
+---
+
+### 9. `rot-serve` — Headless HTTP API
+
+An **Axum** server exposing rot's capabilities over HTTP:
+
+- `GET /health` — health check
+- `POST /exec` — execute a prompt (with optional provider/model/agent/session overrides)
+- Returns structured JSON: response text, tool call records, usage summary, timing
+
+---
+
+### 10. `rot-mcp` — Model Context Protocol
+
+Integrates external MCP servers configured in `~/.rot/config.json`. Tools from MCP servers are registered alongside built-in tools.
+
+### 11. `rot-plugin` — Plugin System (Stub)
+
+Reserved for future plugin/WASM extensibility.
+
+---
+
+## Key Design Patterns
+
+| Pattern | Implementation |
+|---------|---------------|
+| **Async-first** | Tokio runtime, all I/O is async |
+| **Trait-based abstraction** | [Provider](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-provider/src/traits.rs#13-39), [Tool](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-serve/src/lib.rs#53-57) traits for extensibility |
+| **Streaming** | SSE-based streaming from all providers, normalized to `StreamEvent` |
+| **Event callbacks** | Agent emits `StreamEvent`s via callbacks for TUI real-time rendering |
+| **Approval system** | `ApprovalCallback` for interactive permission prompts before tool execution |
+| **OS sandboxing** | Commands run under Seatbelt (macOS) or bwrap (Linux) |
+| **Task delegation** | Sub-agents via `TaskTool` with bounded iterations and separate message histories |
+| **Workspace-scoped** | Sessions & path guards scoped to current working directory |
+
+---
+
+## Data Flow
+
+```
+User Input
+    │
+    ▼
+rot-cli (main.rs)
+    │ ── parse CLI args
+    │ ── load config from ~/.rot/config.json
+    │ ── create Provider, ToolRegistry, Agent
+    │
+    ├── Chat Mode ──► rot-tui (run_tui)
+    │                    │
+    │                    ▼
+    │              TUI event loop
+    │                    │ user types message
+    │                    ▼
+    │              Agent.process()
+    │                    │
+    ├── Exec Mode ──► Agent.process() directly
+    │
+    ▼
+Agent Loop (rot-core/agent.rs)
+    │
+    ├─► Provider.stream(request)  ← rot-provider
+    │       │
+    │       ▼
+    │   Parse StreamEvents (text, tool calls, thinking)
+    │       │
+    │       ├─ Text ──► emit via EventCallback ──► TUI renders
+    │       │
+    │       └─ ToolCall ──► check permissions ──► execute tool
+    │                           │
+    │                           ├─ BashTool ──► rot-sandbox
+    │                           ├─ ReadTool, WriteTool, etc.
+    │                           ├─ TaskTool ──► spawn sub-agent
+    │                           └─ MCP tools ──► rot-mcp
+    │
+    │   Tool results added to messages, loop continues
+    │
+    └─► Session auto-saved (rot-session, JSONL)
+```
+
+---
+
+## How to Build & Run
+
+```bash
+# Build
+cargo build                    # Debug
+cargo build --release          # Optimized (LTO, stripped)
+
+# Run
+cargo run --package rot-cli    # TUI chat mode
+rot                            # After install
+
+# Test
+cargo test                     # All tests
+cargo test --package rot-core  # Specific crate
+
+# Lint
+cargo clippy -- -D warnings
+cargo fmt -- --check
+```
+
+---
+
+## Configuration
+
+- **Global config**: `~/.rot/config.json`
+- **API keys**: via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`)
+- **Security**: `--sandbox` and `--ask-for-approval` flags, or config defaults
+- **MCP servers**: configured in `config.json` under `mcp_servers`
+
+---
+
+## Summary Stats
+
+| Metric | Value |
+|--------|-------|
+| Language | Rust (2021 edition) |
+| Crates | 11 |
+| Source files | ~96 [.rs](file:///Users/akashrathod/Desktop/projects/rot/test_bash.rs) files |
+| Largest files | [app.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-tui/src/app.rs) (1720 lines), [agent.rs](file:///Users/akashrathod/Desktop/projects/rot/crates/rot-core/src/agent.rs) (1538 lines) |
+| LLM Providers | 7 (+ Mock) |
+| Built-in Tools | 20 |
+| Key dependencies | tokio, ratatui, reqwest, clap, serde, axum |
+| Version | 0.1.2 |

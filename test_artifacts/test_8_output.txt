@@ -1,0 +1,21 @@
+Loaded tools (20):
+bash [builtin] - Execute a shell command and return stdout/stderr.
+codesearch [builtin] - Search code with ranked file matches and contextual snippets.
+edit [builtin] - Edit a file by replacing an exact string match. Fails if the string is not found or appears multiple times without replace_all=true.
+glob [builtin] - Find files matching a glob pattern. Respects .gitignore.
+grep [builtin] - Search file contents with regex. Supports file filtering and context lines.
+list [builtin] - List files and directories with optional recursion and hidden-file filtering.
+lsp [builtin] - EXPERIMENTAL: Language-server code intelligence with graceful codesearch fallback.
+nvim_read_buffer [custom] - Reads the content of a Neovim buffer if rot is running inside a Neovim terminal.
+nvim_write_buffer [custom] - Writes or appends text to the current Neovim buffer.
+patch [builtin] - Apply deterministic exact-text hunks to a file in a single operation.
+question [builtin] - Request clarification from the user inside the conversation flow.
+read [builtin] - Read the contents of a file. Supports line offset and limit.
+task [builtin] - Delegate a focused task to a subagent and return its final response.
+tmux_capture_pane [custom] - Captures the text content of a tmux pane.
+tmux_send_keys [custom] - Sends keys or commands to a tmux pane.
+todoread [builtin] - Read structured todo/task state for the current workspace.
+todowrite [builtin] - Create, update, remove, or replace structured todo/task state for this workspace.
+webfetch [builtin] - Fetch the contents of a URL and return the response body as text.
+websearch [builtin] - Search the web for a query and return concise structured results.
+write [builtin] - Create or overwrite a file with the given content. Creates parent directories if needed.

@@ -1,0 +1,37 @@
+Recursive Operations Tool — AI coding agent
+
+Usage: rot [OPTIONS] [COMMAND]
+
+Commands:
+  chat       Start an interactive chat session (default)
+  exec       Execute a single prompt and exit
+  session    Manage sessions
+  tools      Inspect loaded tools
+  providers  List configured and available providers
+  models     List models for the active provider
+  serve      Run a local HTTP service for headless exec automation
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --provider <PROVIDER>
+          LLM provider to use
+      --agent <AGENT>
+          Built-in agent profile to use
+      --model <MODEL>
+          Model to use (defaults to provider's default model)
+  -v, --verbose
+          Enable verbose logging
+      --allow-unsafe-rlm
+          Explicitly allow RLM execution in danger-full-access mode
+      --sandbox <SANDBOX>
+          Sandbox mode for tool execution [possible values: read-only, workspace-write, danger-full-access]
+      --ask-for-approval <ASK_FOR_APPROVAL>
+          Approval policy for tool execution [possible values: untrusted, on-request, never]
+      --full-auto
+          Shortcut for --sandbox workspace-write --ask-for-approval on-request
+      --dangerously-bypass-approvals-and-sandbox
+          Disable sandbox and approvals (DANGEROUS). Alias: --yolo [aliases: --yolo]
+  -h, --help
+          Print help
+  -V, --version
+          Print version

@@ -1,0 +1,24 @@
+Running tests...
+
+Test 1: Basic Chat
+  ✗ FAIL - Exit code: 2
+Test 2: Bash Tool - List Files
+  ✗ FAIL - Exit code: 2
+Test 3: Read Tool - Cargo.toml
+  ✗ FAIL - Exit code: 2
+Test 4: Glob Tool - Find Rust Files
+  ✗ FAIL - Exit code: 2
+Test 5: Help Command
+  ✓ PASS
+Test 6: Providers List
+  ✓ PASS
+Test 7: Models List
+  ✓ PASS
+Test 8: Tools List
+  ✗ FAIL - Expected pattern not found: Tool
+
+=== Test Summary ===
+Total Tests: 8
+Passed: 3
+Failed: 5
+Completed: Wed Mar  4 20:19:23 IST 2026

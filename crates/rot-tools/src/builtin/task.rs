@@ -1,7 +1,7 @@
 //! Task tool — delegate work to a subagent.
 
 use crate::error::ToolError;
-use crate::traits::{SwarmRequest, TaskRequest, Tool, ToolContext, ToolResult};
+use crate::traits::{SwarmRequest, TaskRequest, TaskRunner, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -29,44 +29,12 @@ pub struct TaskParams {
 
 pub struct TaskTool;
 
-#[async_trait]
-impl Tool for TaskTool {
-    fn name(&self) -> &str {
-        "task"
-    }
-
-    fn label(&self) -> &str {
-        "Task"
-    }
-
-    fn description(&self) -> &str {
-        "Delegate a focused task to a subagent and return its final response."
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(TaskParams))
-            .expect("schema serialization should not fail")
-    }
-
-    async fn execute(
+impl TaskTool {
+    async fn execute_internal(
         &self,
-        args: serde_json::Value,
-        ctx: &ToolContext,
+        params: TaskParams,
+        runner: &std::sync::Arc<dyn TaskRunner>,
     ) -> Result<ToolResult, ToolError> {
-        if ctx.task_depth >= ctx.max_task_depth {
-            return Err(ToolError::PermissionDenied(format!(
-                "task recursion limit reached ({})",
-                ctx.max_task_depth
-            )));
-        }
-
-        let params: TaskParams = serde_json::from_value(args)
-            .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
-
-        let runner = ctx.task_runner.as_ref().ok_or_else(|| {
-            ToolError::ExecutionError("task tool is unavailable in this runtime".to_string())
-        })?;
-
         if params.swarm {
             if params.workers.is_empty() {
                 return Err(ToolError::InvalidParameters(
@@ -118,6 +86,58 @@ impl Tool for TaskTool {
                 "child_session_id": result.child_session_id,
             }),
         ))
+    }
+}
+
+#[async_trait]
+impl Tool for TaskTool {
+    fn name(&self) -> &str {
+        "task"
+    }
+
+    fn label(&self) -> &str {
+        "Task"
+    }
+
+    fn description(&self) -> &str {
+        "Delegate a focused task to a subagent and return its final response."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(TaskParams))
+            .expect("schema serialization should not fail")
+    }
+
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult, ToolError> {
+        if ctx.task_depth >= ctx.max_task_depth {
+            return Err(ToolError::PermissionDenied(format!(
+                "task recursion limit reached ({})",
+                ctx.max_task_depth
+            )));
+        }
+
+        let params: TaskParams = serde_json::from_value(args)
+            .map_err(|e| ToolError::InvalidParameters(e.to_string()))?;
+
+        let runner = ctx.task_runner.as_ref().ok_or_else(|| {
+            ToolError::ExecutionError("task tool is unavailable in this runtime".to_string())
+        })?;
+
+        // Wrap execution with timeout
+        let timeout_duration = ctx.timeout;
+        let execution_future = self.execute_internal(params, runner);
+        
+        match tokio::time::timeout(timeout_duration, execution_future).await {
+            Ok(result) => result,
+            Err(_) => Err(ToolError::Timeout(format!(
+                "Task execution exceeded {:?}",
+                timeout_duration
+            ))),
+        }
     }
 }
 
@@ -189,7 +209,7 @@ mod tests {
             .execute(
                 serde_json::json!({
                     "swarm": true,
-                    "workers": ["review", "explore"],
+                    "workers": vec!["review", "explore"],
                     "planner_agent": "plan",
                     "merge_agent": "default",
                     "prompt": "analyze this change set"
@@ -215,11 +235,53 @@ mod tests {
 
         let result = TaskTool
             .execute(
-                serde_json::json!({"agent": "review", "prompt": "inspect changes"}),
+                serde_json::json!({"agent": "review", "prompt":  "inspect changes"}),
                 &ctx,
             )
             .await;
 
         assert!(matches!(result, Err(ToolError::PermissionDenied(_))));
+    }
+
+    #[tokio::test]
+    async fn test_task_timeout_returns_informative_error() {
+        use std::sync::Arc;
+        use tokio::time::{sleep, Duration};
+        
+        struct SlowTaskRunner;
+        
+        #[async_trait]
+        impl TaskRunner for SlowTaskRunner {
+            async fn run_task(&self, _request: TaskRequest) -> Result<TaskExecution, ToolError> {
+                sleep(Duration::from_secs(10)).await;
+                Ok(TaskExecution {
+                    final_text: "done".to_string(),
+                    child_session_id: None,
+                    agent: "test".to_string(),
+                })
+            }
+            
+            async fn run_swarm(&self, _request: SwarmRequest) -> Result<SwarmExecution, ToolError> {
+                unimplemented!()
+            }
+        }
+        
+        let ctx = ToolContext {
+            task_runner: Some(Arc::new(SlowTaskRunner)),
+            timeout: Duration::from_millis(100),
+            ..Default::default()
+        };
+        
+        let result = TaskTool
+            .execute(
+                serde_json::json!({"agent": "test", "prompt":  "slow task"}),
+                &ctx,
+            )
+            .await;
+        
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ToolError::Timeout(_)));
+        assert!(err.to_string().contains("100ms") || err.to_string().contains("0"));
     }
 }

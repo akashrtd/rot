@@ -17,6 +17,8 @@ pub struct ExecOptions {
     pub json: bool,
     pub final_json: bool,
     pub output_schema: Option<String>,
+    pub auto_approve: bool,
+    pub approve_list: Option<String>,
 }
 
 /// Typed error used to propagate deterministic process exit codes.
@@ -125,10 +127,40 @@ pub async fn run(
         (session.id, existing, Vec::new())
     };
 
-    let agent = std::sync::Arc::new(
-        Agent::new(provider, tools, config, runtime_security.clone())
-            .with_session_id(target_session_id.clone()),
-    );
+    let agent = if options.auto_approve {
+        std::sync::Arc::new(
+            Agent::new(provider, tools, config, runtime_security.clone())
+                .with_session_id(target_session_id.clone())
+                .on_approval(Box::new(|_tool_name: &str, _args: &serde_json::Value| {
+                    Box::pin(async move { rot_core::permission::ApprovalResponse::AllowAlways })
+                })),
+        )
+    } else if let Some(list) = &options.approve_list {
+        let approved: std::collections::HashSet<String> = list
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect();
+        std::sync::Arc::new(
+            Agent::new(provider, tools, config, runtime_security.clone())
+                .with_session_id(target_session_id.clone())
+                .on_approval(Box::new(move |tool_name: &str, _args: &serde_json::Value| {
+                    let approved = approved.clone();
+                    let tool = tool_name.to_string();
+                    Box::pin(async move {
+                        if approved.contains(&tool) {
+                            rot_core::permission::ApprovalResponse::AllowAlways
+                        } else {
+                            rot_core::permission::ApprovalResponse::DenyOnce
+                        }
+                    })
+                })),
+        )
+    } else {
+        std::sync::Arc::new(
+            Agent::new(provider, tools, config, runtime_security.clone())
+                .with_session_id(target_session_id.clone()),
+        )
+    };
 
     if rlm {
         if resume_session_id.is_some() || fork {
@@ -143,11 +175,28 @@ pub async fn run(
                 "RLM is blocked in danger-full-access mode unless --allow-unsafe-rlm is set."
             ));
         }
+        let on_progress: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>> = if options.json {
+            Some(std::sync::Arc::new(|msg: String| {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({
+                        "type": "progress",
+                        "message": msg,
+                    })
+                );
+            }))
+        } else {
+            Some(std::sync::Arc::new(|msg: String| {
+                eprintln!("[RLM] {}", msg);
+            }))
+        };
+
         let config = rot_rlm::RlmConfig {
             runtime_security: runtime_security.clone(),
             runtime: rlm_runtime.unwrap_or_default(),
             isolation: rlm_isolation.unwrap_or_default(),
             docker_image: rlm_docker_image,
+            on_progress,
             ..Default::default()
         };
         let runtime_label = format!("{:?}", config.runtime).to_ascii_lowercase();
@@ -198,6 +247,9 @@ pub async fn run(
         Ok(resp) => resp,
         Err(err) => {
             let elapsed_ms = started.elapsed().as_millis();
+            
+            let error_msg = err.to_detailed_string();
+            
             let data = ExecOutputData {
                 status: "error".to_string(),
                 final_text: String::new(),
@@ -207,7 +259,7 @@ pub async fn run(
                     output_tokens: 0,
                 },
                 elapsed_ms,
-                error: Some(err.to_string()),
+                error: Some(error_msg.clone()),
                 provider: provider_label,
                 model: model_label,
                 sandbox_mode: sandbox_mode_label,
@@ -215,6 +267,7 @@ pub async fn run(
                 trajectory_path: None,
             };
             emit_exec_output(&options, &data, &[])?;
+            eprintln!("\n{}", error_msg);
             return Err(anyhow::Error::new(ExecExitError {
                 code: 1,
                 message: "exec failed".to_string(),

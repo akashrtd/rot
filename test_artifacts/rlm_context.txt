@@ -1,0 +1,22 @@
+# ROT Project Context
+
+This is the rot project - an AI coding agent built in Rust.
+
+## Architecture
+- rot-cli: Binary entry point
+- rot-core: Agent loop and message types
+- rot-provider: LLM provider abstraction
+- rot-tools: Built-in tools
+- rot-tui: Terminal UI
+- rot-session: Session persistence
+
+## Key Features
+- Multiple LLM providers (Anthropic, OpenAI, z.ai, etc.)
+- Tool execution (bash, read, write, edit, grep, glob, etc.)
+- Session management
+- RLM (Recursive Language Model) mode
+- MCP (Model Context Protocol) support
+
+## Current Status
+Version: 0.1.2
+Default provider: zai (GLM-5)

@@ -1,0 +1,68 @@
+=== Direct Tests ===
+
+12
+
+Test 2: Bash Tool
+
+Test 3: Read Tool
+The version number is **0.1.2** (line 18).
+There are **96** `.rs` files in the `crates` directory.
+
+
+Test 5: Grep Tool
+Test 4: Glob Tool
+Found **10** `lib.rs` files in the workspace:
+
+1. `crates/rot-core/src/lib.rs`
+2. `crates/rot-mcp/src/lib.rs`
+3. `crates/rot-plugin/src/lib.rs`
+4. `ates/rot-provider/src/lib.rs`
+5. `crates/rot-rlm/src/lib.rs`
+6. `crates/rot-sandbox/src/lib.rs`
+7. `crates/rot-serve/src/lib.rs`
+8. `crates/rot-session/src/lib.rs`
+9. `crates/rot-tools/src/lib.rs`
+10. `crates/rot-tui/src/lib.rs`
+Found 4 matches for `struct App`:
+
+1. **architecture.md:1905** - `pub struct App {`
+2. **ates/rot-serve/src/lib.rs:37** - `struct AppState {`
+3. **crates/rot-tui/src/app.rs:136** - `pub struct App {`
+4. **plan.md:1252** - `pub struct App {`
+
+The main implementations are in:
+- `crates/rot-tui/src/app.rs` - TUI application struct
+- `cr/rotserve/src/lib.rs` - Server AppState struct
+
+The other two are documentation files.
+
+Test 6: Edit Tool (simulated)
+The write tool doesn't allow writing outside the working directory for safety reasons. 
+
+Would you like me to:
+1. Create the file in the current working directory instead (e.g., `./rot.txt`)?
+2. Or use the bash tool to write to `/tmp/rot_test.txt`?
+
+Let me know which you prefer.
+
+Test 7: Write Tool (in workspace)
+Done! Created `test_artifacts/rot_test.txt` with the content "Hello from rot".
+
+Test 8: Edit Tool
+Done! I've successfully edited the file `test_artifacts/rot_test.txt changing 'Hello from rot' to 'Hello from rot - EDITED!'.
+
+Test 9: Task Tool (Subagent)
+
+Test 10: Session Resume
+Your previous was:
+
+"Use the task tool to delegate this task: Count the number of public functions in crates/rot-core/src/lib.rs"
+
+You asked this twice, but I haven't executed it yet Would you like me to do that now?
+
+Test 11: Agent Profile
+Error: Unknown agent 'code'. Available agents: default, build, plan, explore, review
+
+Test 12: Review Agent
+
+Test 13: RLM Mode

@@ -1,0 +1,5 @@
+Provider: zai
+Current model: glm-5
+Models:
+- glm-5 (GLM-5) ctx=128000 max_out=16384 tools=true thinking=false
+- glm-4.7 (GLM-4.7) ctx=128000 max_out=8192 tools=true thinking=false

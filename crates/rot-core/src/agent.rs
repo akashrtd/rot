@@ -779,6 +779,56 @@ pub enum AgentProcessError {
 
     #[error("Max iterations ({0}) reached")]
     MaxIterations(usize),
+
+    #[error("Tool execution failed: {0}")]
+    ToolExecution(String),
+
+    #[error("Tool '{0}' requires approval but running in non-interactive mode")]
+    ApprovalRequired(String),
+
+    #[error("Operation timed out after {0:?}")]
+    Timeout(std::time::Duration),
+}
+
+impl AgentProcessError {
+    pub fn suggestions(&self) -> Vec<String> {
+        match self {
+            AgentProcessError::Timeout(_) => vec![
+                "Simplify your request to reduce processing time".to_string(),
+                "Use --auto-approve for non-interactive mode".to_string(),
+                "Run in interactive mode (without 'exec' subcommand) for complex tasks".to_string(),
+            ],
+            AgentProcessError::ApprovalRequired(tool) => vec![
+                "Use --auto-approve to allow all tool calls".to_string(),
+                format!("Use --approve-list {} to allow this specific tool", tool),
+                "Run in interactive mode (without 'exec' subcommand)".to_string(),
+            ],
+            AgentProcessError::MaxIterations(_) => vec![
+                "Break down your request into smaller tasks".to_string(),
+                "Use a more specific prompt to reduce iterations".to_string(),
+            ],
+            AgentProcessError::ToolExecution(_) => vec![
+                "Check the tool parameters for errors".to_string(),
+                "Run with --verbose for detailed logs".to_string(),
+            ],
+            AgentProcessError::Provider(_) => vec![
+                "Check your API key and provider configuration".to_string(),
+                "Verify network connectivity".to_string(),
+            ],
+        }
+    }
+
+    pub fn to_detailed_string(&self) -> String {
+        let mut msg = self.to_string();
+        let suggestions = self.suggestions();
+        if !suggestions.is_empty() {
+            msg.push_str("\n\nSuggestions:\n");
+            for (i, suggestion) in suggestions.iter().enumerate() {
+                msg.push_str(&format!("  {}. {}\n", i + 1, suggestion));
+            }
+        }
+        msg
+    }
 }
 
 #[cfg(test)]

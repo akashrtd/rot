@@ -1,0 +1,10 @@
+Available providers:
+- anthropic [configured]
+- zai [configured]
+- openai [configured]
+- ollama [no-key]
+- openrouter [missing-key]
+- google [missing-key]
+- mock [no-key]
+
+Current default: provider=zai model=glm-5

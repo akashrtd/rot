@@ -1,0 +1,40 @@
+=== ROT E2E Test Suite ===
+Started: Wed Mar  4 20:19:23 IST 2026
+
+Test 1: Basic Chat
+  ✗ FAIL - Exit code: 2
+  Output saved to: test_artifacts/test_1_output.txt
+
+Test 2: Bash Tool - List Files
+  ✗ FAIL - Exit code: 2
+  Output saved to: test_artifacts/test_2_output.txt
+
+Test 3: Read Tool - Cargo.toml
+  ✗ FAIL - Exit code: 2
+  Output saved to: test_artifacts/test_3_output.txt
+
+Test 4: Glob Tool - Find Rust Files
+  ✗ FAIL - Exit code: 2
+  Output saved to: test_artifacts/test_4_output.txt
+
+Test 5: Help Command
+  ✓ PASS
+  Output saved to: test_artifacts/test_5_output.txt
+
+Test 6: Providers List
+  ✓ PASS
+  Output saved to: test_artifacts/test_6_output.txt
+
+Test 7: Models List
+  ✓ PASS
+  Output saved to: test_artifacts/test_7_output.txt
+
+Test 8: Tools List
+  ✗ FAIL - Expected pattern not found: Tool
+  Output saved to: test_artifacts/test_8_output.txt
+
+=== Test Summary ===
+Total Tests: 8
+Passed: 3
+Failed: 5
+Completed: Wed Mar  4 20:19:23 IST 2026

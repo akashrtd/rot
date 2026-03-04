@@ -1,0 +1,5 @@
+error: unexpected argument 'Cargo.toml' found
+
+Usage: rot exec [OPTIONS] <PROMPT>
+
+For more information, try '--help'.

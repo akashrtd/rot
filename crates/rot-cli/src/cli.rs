@@ -170,6 +170,14 @@ pub enum Commands {
         /// JSON Schema file used to validate final output JSON shape.
         #[arg(long)]
         output_schema: Option<String>,
+
+        /// Automatically approve all tool calls without prompting.
+        #[arg(long)]
+        auto_approve: bool,
+
+        /// Comma-separated list of tool names to auto-approve.
+        #[arg(long)]
+        approve_list: Option<String>,
     },
 
     /// Manage sessions.

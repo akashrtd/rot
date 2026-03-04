@@ -1,0 +1,1 @@
+Error: Non-interactive exec cannot use prompting approval policy. Use --ask-for-approval never (or --yolo).

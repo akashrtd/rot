@@ -1,31 +1,45 @@
-# rot
+<div align="center">
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+# rot (Recursive Operations Tool)
 
-> Recursive Operations Tool, a next-generation AI coding agent for the terminal.
+**A next-generation open-source AI coding agent for your terminal.**
 
-```text
- ███████████      ███████    ███████████
-░░███░░░░░███   ███░░░░░███ ░█░░░███░░░█
- ░███    ░███  ███     ░░███░   ░███  ░
- ░██████████  ░███      ░███    ░███
- ░███░░░░░███ ░███      ░███    ░███
- ░███    ░███ ░░███     ███     ░███
- █████   █████ ░░░███████░      █████
-░░░░░   ░░░░░    ░░░░░░░       ░░░░░
-```
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**rot** makes AI-assisted coding accessible to every developer, regardless of their preferred LLM provider or environment constraints. It solves the fundamental limitation of AI context windows through recursive intelligence, handling massive codebases and document-heavy sessions with ease.
+<br/>
+
+<!-- Replace the src below with the actual path or URL to the screenshot you provided -->
+<img src="./rot.png" alt="rot TUI interface" width="800" />
+
+</div>
+
+<br/>
+
+**rot** makes AI-assisted coding accessible to every developer, regardless of their preferred LLM provider or environment constraints. It solves the fundamental limitation of AI context windows through recursive intelligence, gracefully handling massive codebases and document-heavy sessions.
+
+---
+
+## Features
+
+- **Interactive TUI**: A fully-featured Terminal User Interface with Vim keybindings, side-by-side execution views, and streaming responses.
+- **Multiple AI Providers**: Seamlessly switch between OpenAI, Anthropic, Google Gemini, Ollama (local), and more.
+- **The RLM Engine**: Process massive 10M+ token contexts natively. `rot` allows the LLM to recursively access, chunk, and summarize data via an internal REPL environment.
+- **Robust Tool Integration**: The agent can inspect files, search codebases, and safely execute bash commands.
+- **Strict Security & Sandboxing**: Execute with confidence. `rot` wraps destructive tools in OS-level sandboxing (macOS Seatbelt, Linux bwrap) with discrete permission boundaries.
+- **MCP Support Natively**: Connect external tools easily with native Model Context Protocol (MCP) server integration.
+- **Session Persistence**: Never lose your train of thought. Sessions are efficiently stored via JSONL and can be resumed at any time.
+
+---
 
 ## Quick Start
 
-Fire up the TUI and start pair programming:
+Fire up the TUI and start pair programming immediately:
 
 ```bash
 rot
 ```
 
-Want to use a specific provider or model?
+Want to use a specific provider or model? It’s as simple as:
 
 ```bash
 rot --provider openai --model gpt-4o
@@ -33,34 +47,26 @@ rot --provider ollama --model llama3.1
 rot --provider zai
 ```
 
-## Prerequisites
-
-- Required: Export at least one provider API key in your environment (unless exclusively using Ollama locally).
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-# OR
-export OPENAI_API_KEY="sk-proj-..."
-# OR
-export GOOGLE_API_KEY="..."
-```
+---
 
 ## Installation
 
-### One-line installer (macOS / Linux)
+### One-Line Installer (macOS / Linux)
+
+The fastest way to get started is using our install script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/akashrtd/rot/main/install.sh | bash
 ```
 
-Options:
+_Options:_
 
-- Force reinstall with `ROT_FORCE=1`
-- Select a specific release version with `ROT_VERSION=v0.1.0`
+- Force reinstall: `ROT_FORCE=1`
+- Select a specific release version: `ROT_VERSION=v0.1.0`
 
-### Build from source
+### Build From Source
 
-Requires Rust 1.75+.
+If you prefer to build locally, ensure you have Rust 1.75+ installed:
 
 ```bash
 git clone https://github.com/akashrtd/rot.git
@@ -68,82 +74,82 @@ cd rot
 cargo install --path crates/rot-cli
 ```
 
-## Usage
+---
 
-### Interactive TUI (Chat Mode)
+## Usage Guide
 
-This mode provides a fully-featured terminal UI with Vim keybindings, side-by-side execution views, and streaming responses.
+### 1. Interactive TUI (Chat Mode)
 
-TUI Keybindings:
+This mode provides a responsive, split-pane interface right in your terminal.
+
+**Keybindings:**
 
 - `Enter`: Send message
-- `Shift+Enter`: Newline
+- `Shift+Enter`: Insert newline
 - `Esc`: Switch to Normal mode
 - `i`: Switch to Insert mode
-- `j` / `Down` & `k` / `Up`: Scroll up and down
+- `j` / `Down` & `k` / `Up`: Scroll chat
 - `q` / `Ctrl+C`: Quit
-- `/`: Open Slash command popup (type `/tools` to inspect built-in tools)
+- `/`: Open Slash command popup (e.g., `/tools` to inspect capabilities)
 
-### Single-shot Execution (CI / Automation)
+### 2. Single-Shot Execution
 
-Execute a quick task and exit—perfect for scripts or git hooks.
+Execute a quick task and exit automatically. Perfect for shell scripts, CI pipelines, or quick queries.
 
 ```bash
 rot exec "read main.rs and summarize architecture"
 rot exec "find all TODO comments in the workspace and print them"
-rot --provider anthropic exec "write a unit test for parser.rs"
 ```
 
-### The RLM Engine (Massive Contexts)
+### 3. The RLM Engine for Massive Contexts
 
-When dealing with giant repositories or massive documents, RLM treats standard LLM limits as a thing of the past. It natively processes 10M+ token inputs by allowing the LLM to access, chunk, and summarize data recursively via an internal REPL environment.
+For massive repositories, RLM acts as a recursive memory layer, removing standard token limits.
 
 ```bash
 rot exec --rlm --context ./spec.pdf "extract the core requirements"
 rot exec --rlm --rlm-runtime bash --context ./architecture.md "analyze the design"
 ```
 
-(Note: PDF processing requires `pdftotext` to be installed on your system).
+_(Note: PDF processing requires `pdftotext` to be installed on your system)._
 
-### Session Management
+### 4. Headless Server Mode
 
-`rot` saves your sessions efficiently via JSONL. You do not lose context between working days.
-
-```bash
-rot session list             # View recent sessions
-rot session resume <ID>      # Jump back in
-rot session tree <ID>        # View context tree
-rot session export <ID> ./session.jsonl
-```
-
-### Headless Server Mode
-
-`rot` can act as its own headless service for local integrations:
+Run `rot` as a local headless service so other applications can integrate with its intelligent API:
 
 ```bash
 rot serve --host 0.0.0.0 --port 7878
 ```
 
-## Configuration and MCP
+---
 
-Your global configuration lives at `~/.rot/config.json`. This is where you configure security approvals, custom tools, default providers, and MCP servers.
+## Configuration
 
-### Security and Approvals
+Your global configuration lives at `~/.rot/config.json`. Here you define API keys, security boundaries, and custom tools.
 
-`rot` takes safety seriously. By default, the sandbox network access is off and approvals are required for destructive actions.
+### Prerequisites & API Keys
 
-You can modify sandbox and approval policies via config or flags:
+Before using cloud models, export at least one provider API key:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-proj-..."
+export GOOGLE_API_KEY="..."
+```
+
+### Security Policies
+
+`rot` errs on the side of caution. By default, it requires approval for mutating tasks and disables network access in the sandbox.
+
+You can modify these policies securely per-activation:
 
 ```bash
 rot --sandbox <read-only|workspace-write|danger-full-access>
 rot --ask-for-approval <untrusted|on-request|never>
 ```
 
-(Shortcuts for the bold: `rot --yolo` or `rot --full-auto`)
+### Model Context Protocol (MCP)
 
-### MCP (Model Context Protocol)
-
-`rot` ships with native stdio MCP support. Add an MCP server directly in `config.json`:
+Add MCP servers directly into your `config.json` to extend the AI's capabilities natively:
 
 ```json
 {
@@ -158,9 +164,11 @@ rot --ask-for-approval <untrusted|on-request|never>
 }
 ```
 
-## Development
+---
 
-`rot` is composed of several localized crates (`rot-core`, `rot-rlm`, `rot-tui`, etc.).
+## Development & Contributing
+
+`rot` is split into several modular crates (`rot-core`, `rot-rlm`, `rot-tui`, etc.).
 
 ```bash
 # Debug build
@@ -170,13 +178,15 @@ cargo build
 cargo test
 cargo test -p rot-core
 
-# Lint
+# Linting
 cargo clippy -- -D warnings
 cargo fmt -- --check
 ```
 
-See [AGENTS.md](AGENTS.md) and [architecture.md](architecture.md) for deeper technical contexts if you're looking to contribute.
+_For more internal details, see [AGENTS.md](AGENTS.md) and [architecture.md](architecture.md)._
 
-## License
+---
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### License
+
+`rot` is provided under the MIT License. See the [LICENSE](LICENSE) file for details.

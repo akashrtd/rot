@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "rot-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2042,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "rot-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "dirs",
@@ -2060,7 +2060,7 @@ dependencies = [
 
 [[package]]
 name = "rot-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rot-sandbox",
  "serde",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "rot-plugin"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -2084,7 +2084,7 @@ dependencies = [
 
 [[package]]
 name = "rot-provider"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "rot-rlm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2123,16 +2123,17 @@ dependencies = [
 
 [[package]]
 name = "rot-sandbox"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]
 
 [[package]]
 name = "rot-serve"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2147,7 +2148,7 @@ dependencies = [
 
 [[package]]
 name = "rot-session"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake3",
  "dirs",
@@ -2162,7 +2163,7 @@ dependencies = [
 
 [[package]]
 name = "rot-tools"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "glob",
@@ -2183,7 +2184,7 @@ dependencies = [
 
 [[package]]
 name = "rot-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossterm",
  "futures",

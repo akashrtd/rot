@@ -43,6 +43,12 @@ impl OpenAiCompatProvider {
         }
     }
 
+    /// Override the base URL.
+    pub fn with_base_url(mut self, url: &str) -> Self {
+        self.config.base_url = url.to_string();
+        self
+    }
+
     /// Build the JSON request body.
     fn build_request_body(&self, request: Request) -> Value {
         let messages = self.convert_messages(&request);
@@ -196,6 +202,13 @@ impl OpenAiCompatProvider {
         };
 
         let mut events = Vec::new();
+
+        if let Some(usage) = &chunk.usage {
+            events.push(StreamEvent::Usage {
+                input: usage.prompt_tokens,
+                output: usage.completion_tokens,
+            });
+        }
 
         for choice in &chunk.choices {
             // Text delta
@@ -385,6 +398,8 @@ impl Provider for OpenAiCompatProvider {
 struct OpenAiChunk {
     #[serde(default)]
     choices: Vec<OpenAiChunkChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, Deserialize)]

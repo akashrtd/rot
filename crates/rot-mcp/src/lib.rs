@@ -475,3 +475,65 @@ fn render_content_text(content: &[Value], structured_content: Option<&Value>) ->
 
     parts.join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_parse_tool_info_valid() {
+        let value = json!({
+            "name": "read_file",
+            "description": "Reads a file",
+            "inputSchema": { "type": "object", "properties": {} }
+        });
+        let info = parse_tool_info("test-server", &value).unwrap();
+        assert_eq!(info.name, "read_file");
+        assert_eq!(info.description, "Reads a file");
+    }
+
+    #[test]
+    fn test_parse_tool_info_missing_name() {
+        let value = json!({ "description": "missing name" });
+        let res = parse_tool_info("test-server", &value);
+        assert!(matches!(res, Err(McpError::InvalidResponse { .. })));
+    }
+
+    #[test]
+    fn test_parse_tool_info_defaults() {
+        let value = json!({ "name": "basic" });
+        let info = parse_tool_info("test-server", &value).unwrap();
+        assert_eq!(info.name, "basic");
+        assert_eq!(info.description, "MCP tool");
+        assert_eq!(info.input_schema["type"], "object");
+    }
+
+    #[test]
+    fn test_render_content_text_empty() {
+        let rendered = render_content_text(&[], None);
+        assert_eq!(rendered, "(no output)");
+    }
+
+    #[test]
+    fn test_render_content_text_with_structured() {
+        let structured = json!({"hello": "world"});
+        let rendered = render_content_text(&[], Some(&structured));
+        assert!(rendered.contains("\"hello\":"));
+        assert!(rendered.contains("\"world\""));
+    }
+
+    #[test]
+    fn test_render_content_text_mixed() {
+        let items = vec![
+            json!({"type": "text", "text": "first line"}),
+            json!({"type": "image", "data": "base64"}),
+            json!({"type": "resource", "resource": {"text": "resource content"}}),
+        ];
+        let rendered = render_content_text(&items, None);
+        assert_eq!(
+            rendered,
+            "first line\n[image content omitted]\nresource content"
+        );
+    }
+}

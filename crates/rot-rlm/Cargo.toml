@@ -19,6 +19,7 @@ ulid = "1"
 blake3 = { workspace = true }
 anyhow.workspace = true
 rot-tools = { version = "0.1.0", path = "../rot-tools" }
+ignore = "0.4"
 
 [dev-dependencies]
 tempfile = { workspace = true }

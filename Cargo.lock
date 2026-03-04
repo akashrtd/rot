@@ -2107,6 +2107,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "futures",
+ "ignore",
  "regex",
  "rot-core",
  "rot-provider",

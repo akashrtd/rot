@@ -23,7 +23,7 @@ impl LoadedContext {
     }
 }
 
-/// Load and normalize context text from a source file.
+/// Load and normalize context text from a source file or directory.
 pub async fn load_context(path: &Path) -> anyhow::Result<LoadedContext> {
     let source_path = path.canonicalize().map_err(|e| {
         anyhow::anyhow!(
@@ -31,6 +31,10 @@ pub async fn load_context(path: &Path) -> anyhow::Result<LoadedContext> {
             path.display()
         )
     })?;
+
+    if source_path.is_dir() {
+        return load_directory_context(&source_path).await;
+    }
 
     let bytes = tokio::fs::read(&source_path)
         .await
@@ -93,6 +97,68 @@ pub async fn load_context(path: &Path) -> anyhow::Result<LoadedContext> {
         source_path,
         extracted_path,
         detected_type,
+        content,
+    })
+}
+
+async fn load_directory_context(dir: &Path) -> anyhow::Result<LoadedContext> {
+    let dir_clone = dir.to_path_buf();
+    
+    let content = tokio::task::spawn_blocking(move || {
+        let mut all_content = String::new();
+        let mut files_processed = 0;
+        
+        // Ignore parses .gitignore and automatically excludes binary files via standard hidden/ignore rules
+        let walker = ignore::WalkBuilder::new(&dir_clone)
+            .hidden(true)
+            .require_git(false)
+            .build();
+            
+        for entry in walker.flatten() {
+            if entry.file_type().is_some_and(|ft| ft.is_file()) {
+                let path = entry.path();
+                if let Ok(bytes) = std::fs::read(path) {
+                    if !looks_binary(&bytes) {
+                        if files_processed > 0 {
+                            all_content.push_str("\n\n---\n\n");
+                        }
+                        let rel_path = path.strip_prefix(&dir_clone).unwrap_or(path).to_string_lossy();
+                        all_content.push_str(&format!("File: {}\n\n", rel_path));
+                        all_content.push_str(&String::from_utf8_lossy(&bytes));
+                        files_processed += 1;
+                    }
+                }
+            }
+        }
+        
+        if files_processed == 0 {
+            Err(anyhow::anyhow!("No text files found in directory '{}'", dir_clone.display()))
+        } else {
+            Ok(all_content)
+        }
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Directory walk task panicked: {}", e))??;
+    
+    let cache_dir = std::env::temp_dir().join("rot-rlm").join("context-cache");
+    tokio::fs::create_dir_all(&cache_dir).await.map_err(|e| {
+        anyhow::anyhow!("Failed to create context cache '{}': {e}", cache_dir.display())
+    })?;
+    
+    let cache_name = format!(
+        "{}-{}.txt",
+        blake3::hash(dir.to_string_lossy().as_bytes()).to_hex(),
+        ulid::Ulid::new()
+    );
+    let extracted_path = cache_dir.join(cache_name);
+    tokio::fs::write(&extracted_path, &content).await.map_err(|e| {
+        anyhow::anyhow!("Failed to write extracted context '{}': {e}", extracted_path.display())
+    })?;
+
+    Ok(LoadedContext {
+        source_path: dir.to_path_buf(),
+        extracted_path,
+        detected_type: "directory".to_string(),
         content,
     })
 }

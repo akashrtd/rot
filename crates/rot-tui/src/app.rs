@@ -217,7 +217,7 @@ impl App {
             pending_approval_tool: None,
             pending_approval_args: None,
             pending_approval_tx: None,
-            rlm_enabled: true,
+            rlm_enabled: false,
             rlm_iterating: false,
             config_ui_state: ConfigUiState::default(),
             config_changed: false,

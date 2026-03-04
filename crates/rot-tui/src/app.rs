@@ -1065,76 +1065,80 @@ impl App {
             .border_type(ratatui::widgets::BorderType::Thick)
             .padding(ratatui::widgets::Padding::horizontal(1));
 
-        let style = match self.state {
-            AppState::Idle => Style::default().fg(COLOR_CODE_FG),
-            AppState::Thinking | AppState::Streaming => Style::default().fg(COLOR_DIM),
-            AppState::Approval | AppState::Error => Style::default().fg(COLOR_ERROR),
-            AppState::Agents => Style::default().fg(COLOR_DIM),
-            AppState::Config => Style::default().fg(COLOR_DIM),
-        };
-
         let mut lines = Vec::new();
+        // Calculate available width for text (area width - 2 border padding)
+        let text_width = area.width.saturating_sub(2);
+        
         for (i, line) in self.input.split('\n').enumerate() {
-            if i == 0 {
-                lines.push(Line::from(vec![
-                    Span::styled(prompt, style),
-                    Span::styled(line.to_string(), style),
-                ]));
-            } else {
-                lines.push(Line::from(vec![
-                    Span::styled("  ", style),
-                    Span::styled(line.to_string(), style),
-                ]));
-            }
+            let prefix = if i == 0 { prompt } else { "  " };
+            let style = match self.state {
+                AppState::Idle => Style::default().fg(COLOR_CODE_FG),
+                AppState::Thinking | AppState::Streaming => Style::default().fg(COLOR_DIM),
+                AppState::Approval | AppState::Error => Style::default().fg(COLOR_ERROR),
+                AppState::Agents => Style::default().fg(COLOR_DIM),
+                AppState::Config => Style::default().fg(COLOR_DIM),
+            };
+            lines.push(Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(line.to_string(), style),
+            ]));
         }
 
-        // Calculate available width for text (area width - 2 padding)
-        let text_width = area.width.saturating_sub(2);
-
         // Calculate cursor position accounting for visual line wrapping
-        // We need to count all visual lines up to the cursor position
-        let text_before_cursor = &self.input[..self.cursor_pos];
         let mut cursor_y: u16 = 0;
-        let mut cursor_x: u16 = 0;
-
-        for (line_idx, line) in text_before_cursor.split('\n').enumerate() {
-            let line_chars = line.chars().count() as u16;
+        let mut cursor_x: u16 = prompt_len;
+        
+        // Count how many characters precede the cursor in the input string
+        let char_count = self.input[..self.cursor_pos].chars().count();
+        let mut counted = 0;
+        
+        for (line_idx, line) in self.input.split('\n').enumerate() {
             let prefix_width = if line_idx == 0 { prompt_len } else { 2 };
+            let line_chars = line.chars().count() as u16;
             let available_width = text_width.saturating_sub(prefix_width).max(1);
-
-            if line_idx > 0 {
-                // Each newline adds one visual line
-                cursor_y += 1;
-            }
-
-            // Calculate how many visual lines this logical line takes
-            if line_chars == 0 {
-                cursor_x = prefix_width;
-            } else {
-                let n = line_chars - 1;
+            
+            // If the cursor is within this logical line or at the very edge of it
+            let remaining_to_cursor = char_count.saturating_sub(counted);
+            if remaining_to_cursor <= line_chars as usize {
+                // Cursor is on this logical line
+                let n = remaining_to_cursor as u16;
                 let visual_lines = n / available_width;
-                let pos_on_line = (n % available_width) + 1;
+                let pos_on_line = n % available_width;
                 
                 cursor_y += visual_lines;
                 cursor_x = prefix_width + pos_on_line;
+                break;
             }
+            
+            // Move past this line (line_chars + 1 for the newline)
+            counted += line_chars as usize + 1;
+            
+            // Add visual height of this line for the offset
+            let visual_lines = if line_chars == 0 { 0 } else { (line_chars - 1) / available_width };
+            cursor_y += visual_lines + 1; // +1 for the line itself
         }
 
-        let visible_height = area.height.saturating_sub(1); // TOP border
+        let visible_height = area.height.saturating_sub(2); // Top border + 1 bottom margin/border if any
         let scroll_y = if cursor_y >= visible_height {
             cursor_y.saturating_sub(visible_height) + 1
         } else {
             0
         };
 
-        let input_widget = Paragraph::new(lines).block(block).scroll((scroll_y, 0));
+        let input_widget = Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_y, 0));
+            
         frame.render_widget(input_widget, area);
 
         // Cursor
         if self.input_mode == InputMode::Insert && self.state == AppState::Idle {
-            // Clamp cursor_x to visible area (leave 1 char margin for border)
-            let max_x = area.x + area.width.saturating_sub(2);
-            let x = (area.x + cursor_x + 1).min(max_x); // +1 for padding
+            // Clamp cursor_x to visible area (leave 1 char margin for border padding)
+            let max_x = area.width.saturating_sub(2);
+            let display_x = cursor_x.min(max_x);
+            let x = area.x + display_x + 1; // +1 for block padding
+            
             let y = area.y + 1 + cursor_y.saturating_sub(scroll_y);
             
             if y > area.y && y < area.y + area.height {
@@ -1331,11 +1335,20 @@ impl App {
                 Style::default().fg(COLOR_DIM).bg(COLOR_CODE_BG)
             };
 
+            let is_current = name == &self.agent;
+            let current_marker = if is_current {
+                Span::styled(" (current)", Style::default().fg(COLOR_ACCENT).bold())
+            } else {
+                Span::raw("")
+            };
+            
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{name:<width$}", width = max_name_len + 1),
                     style,
                 ),
+                current_marker,
+                Span::raw(" - "),
                 Span::styled(desc.to_string(), desc_style),
             ]));
         }
@@ -1447,10 +1460,12 @@ impl App {
 
         match &self.config_ui_state {
             ConfigUiState::List(selected_idx) => {
+                let current_tuple = (self.provider.as_str(), self.model.as_str());
                 let items: Vec<ratatui::widgets::ListItem> = AVAILABLE_MODELS
                     .iter()
                     .enumerate()
                     .map(|(i, (p, m))| {
+                        let is_current = current_tuple == (*p, *m);
                         let mut style = Style::default().fg(COLOR_CODE_FG);
                         let prefix = if i == *selected_idx {
                             style = style.fg(COLOR_ACCENT).bold();
@@ -1458,7 +1473,14 @@ impl App {
                         } else {
                             "   "
                         };
-                        ratatui::widgets::ListItem::new(format!("{prefix}{} / {}", p, m)).style(style)
+                        
+                        let current_marker = if is_current {
+                            " (current)"
+                        } else {
+                            ""
+                        };
+                        
+                        ratatui::widgets::ListItem::new(format!("{prefix}{} / {}{current_marker}", p, m)).style(style)
                     })
                     .collect();
 

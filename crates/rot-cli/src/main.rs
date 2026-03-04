@@ -10,7 +10,14 @@ use clap::Parser;
 use cli::{Cli, Commands, SessionAction};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
+    if let Err(err) = run().await {
+        eprintln!("\x1b[31;1mError:\x1b[0m {}", err);
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config_store = rot_core::ConfigStore::new();
     config_store.hydrate_env();
@@ -56,12 +63,16 @@ async fn main() -> anyhow::Result<()> {
             json,
             final_json,
             ref output_schema,
+            auto_approve,
+            ref approve_list,
         }) => {
             let security = cli.resolve_runtime_security_for_exec(&config)?;
             let options = commands::exec::ExecOptions {
                 json,
                 final_json,
                 output_schema: output_schema.clone(),
+                auto_approve,
+                approve_list: approve_list.clone(),
             };
             let machine_output = options.json || options.final_json;
             if let Err(err) = commands::exec::run(
@@ -103,12 +114,32 @@ async fn main() -> anyhow::Result<()> {
                 if sessions.is_empty() {
                     println!("No sessions found.");
                 } else {
+                    println!("┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓");
+                    println!("┃ SESSION ID               ┃ MODEL                  ┃ MSGS ┃ CWD                                                 ┃");
+                    println!("┣━━━━━━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━╋━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫");
                     for s in &sessions {
+                        let id = if s.id.len() > 24 {
+                            format!("{}…", &s.id[..23])
+                        } else {
+                            s.id.clone()
+                        };
+                        let model = if s.model.len() > 22 {
+                            format!("{}…", &s.model[..21])
+                        } else {
+                            s.model.clone()
+                        };
+                        let cwd = if s.cwd.len() > 51 {
+                            format!("…{}", &s.cwd[s.cwd.len() - 50..])
+                        } else {
+                            s.cwd.clone()
+                        };
+                        
                         println!(
-                            "{} | {} | {} msgs | {}",
-                            s.id, s.model, s.message_count, s.cwd
+                            "┃ {:<24} ┃ {:<22} ┃ {:>4} ┃ {:<51} ┃",
+                            id, model, s.message_count, cwd
                         );
                     }
+                    println!("┗━━━━━━━━━━━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━━┻━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛");
                 }
             }
             SessionAction::Tree { id } => {
@@ -184,14 +215,14 @@ fn print_session_tree(
     let branch = if is_root {
         ""
     } else if is_last {
-        "└─ "
+        "└── "
     } else {
-        "├─ "
+        "├── "
     };
-    let marker = if node.meta.id == focus_id { ">" } else { " " };
+    let marker = if node.meta.id == focus_id { "▶" } else { " " };
     let agent = node.meta.agent.as_deref().unwrap_or("root");
     println!(
-        "{}{}{} {} @{} {} ({} msgs)",
+        "{}{}{} \x1b[1m{}\x1b[0m \x1b[36m@{:<8}\x1b[0m \x1b[2m{}\x1b[0m ({} msgs)",
         prefix,
         branch,
         marker,
@@ -204,9 +235,9 @@ fn print_session_tree(
     let child_prefix = if is_root {
         String::new()
     } else if is_last {
-        format!("{}   ", prefix)
+        format!("{}    ", prefix)
     } else {
-        format!("{}│  ", prefix)
+        format!("{}│   ", prefix)
     };
 
     for (idx, child) in node.children.iter().enumerate() {

@@ -256,10 +256,9 @@ impl Agent {
                         }
                     }
                     StreamEvent::Done { reason } => {
-                        if reason == StopReason::ToolUse {
-                            if let Some(tc) = current_tool.take() {
-                                tool_calls.push(tc);
-                            }
+                        // Always flush any pending tool call on Done
+                        if let Some(tc) = current_tool.take() {
+                            tool_calls.push(tc);
                         }
                         stop_reason = reason;
                         break;
@@ -289,8 +288,10 @@ impl Agent {
             persist_message_to_session(&invocation.session_id, &assistant_msg).await;
             messages.push(assistant_msg);
 
-            // If no tool calls, we're done
-            if tool_calls.is_empty() || stop_reason != StopReason::ToolUse {
+            // If no tool calls, we're done.
+            // We follow the tool_calls list rather than just the stop_reason,
+            // as some providers might return EndTurn even when tool calls are present.
+            if tool_calls.is_empty() {
                 return Ok(messages.last().cloned().unwrap());
             }
 

@@ -837,8 +837,10 @@ impl App {
         }
 
         // No heavy box border — just a subtle bottom border for separation
+        use ratatui::widgets::Padding;
         let block = Block::default()
-            .borders(Borders::NONE);
+            .borders(Borders::NONE)
+            .padding(Padding::horizontal(1));
 
         // Auto-scroll + clamp
         let inner_height = area.height;
@@ -882,9 +884,10 @@ impl App {
         let input_text = format!("{prompt}{display_input}");
 
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::TOP)
             .border_style(Style::default().fg(border_color))
-            .border_type(ratatui::widgets::BorderType::Thick);
+            .border_type(ratatui::widgets::BorderType::Thick)
+            .padding(ratatui::widgets::Padding::horizontal(1));
 
         let style = match self.state {
             AppState::Idle => Style::default().fg(COLOR_CODE_FG),
@@ -903,8 +906,8 @@ impl App {
                 .chars()
                 .map(|c| if c == '\n' { 3 } else { 1 }) // ↵  = " ↵ " = 3 chars
                 .sum();
-            let x = area.x + visible_pos as u16 + 3; // +1 border +2 prompt
-            let y = area.y + 1;
+            let x = area.x + visible_pos as u16 + 3; // +1 padding +2 prompt
+            let y = area.y + 1; // +1 because of TOP border thickness
             frame.set_cursor_position(Position::new(x, y));
         }
     }

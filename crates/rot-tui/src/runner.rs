@@ -6,7 +6,10 @@
 
 use crate::app::{App, AppState, ChatStyle, ConfigUiState, InputMode};
 use crate::event::{is_quit, poll_event, TermEvent};
-use crossterm::event::{EnableMouseCapture, DisableMouseCapture, KeyCode, KeyModifiers};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, KeyCode,
+    KeyModifiers,
+};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -62,6 +65,7 @@ pub async fn run_tui(
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     stdout().execute(EnableMouseCapture)?;
+    stdout().execute(EnableBracketedPaste)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
     let config_store = rot_core::config::ConfigStore::new();
@@ -571,6 +575,12 @@ pub async fn run_tui(
                     }
                 }
             }
+            TermEvent::Paste(content) => {
+                needs_redraw = true;
+                if app.input_mode == InputMode::Insert {
+                    app.insert_string(&content);
+                }
+            }
             TermEvent::MouseDown(_x, y) => {
                 needs_redraw = true;
                 let height = terminal.size()?.height;
@@ -599,6 +609,7 @@ pub async fn run_tui(
     // Cleanup
     disable_raw_mode()?;
     stdout().execute(DisableMouseCapture)?;
+    stdout().execute(DisableBracketedPaste)?;
     stdout().execute(LeaveAlternateScreen)?;
     Ok(())
 }

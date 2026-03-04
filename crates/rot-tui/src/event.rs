@@ -12,6 +12,8 @@ pub enum TermEvent {
     MouseScroll(i16),
     /// Mouse down.
     MouseDown(u16, u16),
+    /// Terminal sent a paste event.
+    Paste(String),
     /// Terminal was resized.
     Resize(u16, u16),
     /// No event (tick).
@@ -29,6 +31,7 @@ pub fn poll_event(timeout: Duration) -> std::io::Result<TermEvent> {
                 MouseEventKind::Down(_) => Ok(TermEvent::MouseDown(mouse.column, mouse.row)),
                 _ => Ok(TermEvent::Tick),
             },
+            Event::Paste(content) => Ok(TermEvent::Paste(content)),
             Event::Resize(w, h) => Ok(TermEvent::Resize(w, h)),
             _ => Ok(TermEvent::Tick),
         }

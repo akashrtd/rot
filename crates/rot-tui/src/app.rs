@@ -453,6 +453,12 @@ impl App {
         self.sync_slash_menu_selection();
     }
 
+    pub fn insert_string(&mut self, s: &str) {
+        self.input.insert_str(self.cursor_pos, s);
+        self.cursor_pos += s.len();
+        self.sync_slash_menu_selection();
+    }
+
     pub fn insert_newline(&mut self) {
         self.input.insert(self.cursor_pos, '\n');
         self.cursor_pos += 1;

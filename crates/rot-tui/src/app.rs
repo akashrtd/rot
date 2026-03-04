@@ -133,7 +133,7 @@ pub enum AccessMode {
     Full,
 }
 
-pub struct App {
+    pub struct App {
     pub state: AppState,
     pub input_mode: InputMode,
     pub running: bool,
@@ -156,7 +156,6 @@ pub struct App {
     pub last_elapsed: Option<Duration>,
     pub message_count: usize,
     pub showed_welcome: bool,
-    /// Maximum scroll offset (computed during render).
     pub max_scroll: u16,
     
     // Approval state
@@ -176,6 +175,11 @@ pub struct App {
     pub clipboard: Option<Arc<Mutex<arboard::Clipboard>>>,
     pub access_mode: AccessMode,
     pub access_changed: bool,
+    
+    // UX enhancements
+    pub copy_feedback_until: Option<Instant>,
+    pub is_switching_model: bool,
+    pub is_switching_agent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -238,6 +242,9 @@ impl App {
             clipboard: arboard::Clipboard::new().map(|c| Arc::new(Mutex::new(c))).ok(),
             access_mode: AccessMode::Default,
             access_changed: false,
+            copy_feedback_until: None,
+            is_switching_model: false,
+            is_switching_agent: false,
         }
     }
 
@@ -246,6 +253,7 @@ impl App {
             if let Ok(mut cb) = clipboard.lock() {
                 if cb.set_text(text).is_ok() {
                     self.status = "Copied to clipboard!".to_string();
+                    self.copy_feedback_until = Some(Instant::now() + Duration::from_secs(2));
                 }
             }
         }
@@ -271,26 +279,41 @@ impl App {
             .collect::<Vec<_>>()
             .join("/");
 
+        // Truncate fields if too long for the box
+        let max_field_len = 20;
+        let truncate_field = |s: &str| {
+            if s.len() > max_field_len {
+                format!("…{}", &s[s.len().saturating_sub(max_field_len - 1)..])
+            } else {
+                s.to_string()
+            }
+        };
+
+        let provider_str = truncate_field(&self.provider);
+        let model_str = truncate_field(&self.model);
+        let agent_str = truncate_field(&self.agent);
+        let cwd_str = if short_cwd.len() > max_field_len {
+            format!("…{}", &short_cwd[short_cwd.len().saturating_sub(max_field_len - 1)..])
+        } else {
+            short_cwd
+        };
+
         let welcome = format!(
             "{}\n\
-             ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n\
-             ┃  provider : {:<23}┃\n\
-             ┃  model    : {:<23}┃\n\
-             ┃  agent    : {:<23}┃\n\
-             ┃  cwd      : {:<23}┃\n\
-             ┃  rlm      : {:<23}┃\n\
-             ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\
+             ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n\
+             ┃ provider: {:<19}┃\n\
+             ┃ model   : {:<19}┃\n\
+             ┃ agent   : {:<19}┃\n\
+             ┃ cwd     : {:<19}┃\n\
+             ┃ rlm     : {:<19}┃\n\
+             ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\
              \n\
              Type a message or use /help for commands.",
             ASCII_BANNER.trim_matches('\n'),
-            self.provider,
-            self.model,
-            self.agent,
-            if short_cwd.len() > 23 {
-                format!("…{}", &short_cwd[short_cwd.len().saturating_sub(22)..])
-            } else {
-                short_cwd
-            },
+            provider_str,
+            model_str,
+            agent_str,
+            cwd_str,
             if self.rlm_enabled { "on" } else { "off" }
         );
         self.push_chat("", &welcome, ChatStyle::Welcome);
@@ -661,12 +684,38 @@ impl App {
 
     pub fn tick(&mut self) {
         self.thinking_tick = self.thinking_tick.wrapping_add(1);
+        
+        // Clear copy feedback after timeout
+        if let Some(until) = self.copy_feedback_until {
+            if Instant::now() >= until {
+                self.copy_feedback_until = None;
+                if self.status == "Copied to clipboard!" || self.status == "✓ Copied!" {
+                    self.status = "Ready".to_string();
+                }
+            }
+        }
     }
 
     // ── Rendering ──────────────────────────────────────────────────────
 
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
+        
+        // Minimum terminal size check
+        const MIN_WIDTH: u16 = 40;
+        const MIN_HEIGHT: u16 = 12;
+        
+        if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
+            let warning = Paragraph::new(format!(
+                "Terminal too small!\n\nMinimum: {}x{}\nCurrent: {}x{}",
+                MIN_WIDTH, MIN_HEIGHT,
+                area.width, area.height
+            ))
+            .style(Style::default().fg(COLOR_ERROR))
+            .alignment(Alignment::Center);
+            frame.render_widget(warning, area);
+            return;
+        }
 
         let is_dialog_active = self.state == AppState::Approval
             || self.state == AppState::Config
@@ -683,8 +732,16 @@ impl App {
         let inner = outer_block.inner(area);
         frame.render_widget(outer_block, area);
 
-        // Calculate input box height dynamically
-        let input_lines = self.input.split('\n').count() as u16;
+        // Calculate input box height dynamically with proper line wrap accounting
+        let input_char_count = self.input.chars().count() as u16;
+        let input_newlines = self.input.matches('\n').count() as u16;
+        // Estimate wrapped lines based on available width (rough estimate: ~60 chars per line)
+        let estimated_wrap_lines = if area.width > 10 {
+            input_char_count / area.width.saturating_sub(10)
+        } else {
+            0
+        };
+        let input_lines = input_newlines + estimated_wrap_lines + 1;
         let input_height = (input_lines + 2).clamp(3, (area.height / 3).max(3));
 
         // Layout: header(1) | messages(flex) | input(dynamic) | footer(1)
@@ -749,9 +806,24 @@ impl App {
             String::new()
         };
 
+        // Determine status text
+        let status_text = if self.is_switching_model {
+            "Switching model...".to_string()
+        } else if self.is_switching_agent {
+            "Switching agent...".to_string()
+        } else if let Some(until) = self.copy_feedback_until {
+            if Instant::now() < until {
+                "✓ Copied!".to_string()
+            } else {
+                self.status.clone()
+            }
+        } else {
+            self.status.clone()
+        };
+
         let mut header_spans = vec![
             Span::styled(format!(" {spinner} "), Style::default().fg(state_color)),
-            Span::styled(format!(" {}", self.status), Style::default().fg(COLOR_BAR_FG)),
+            Span::styled(format!(" {}", status_text), Style::default().fg(COLOR_BAR_FG)),
         ];
 
         let mut right_spans = vec![];
@@ -781,6 +853,10 @@ impl App {
 
     fn render_messages(&mut self, frame: &mut Frame, area: Rect) {
         let mut lines: Vec<Line> = Vec::new();
+        
+        // Account for actual rendered overhead: 1 space + bar span (~3 chars) = ~4 chars
+        // Plus 2 chars for horizontal padding in the block
+        const MSG_OVERHEAD: usize = 6;
 
         for msg in &self.chat_lines {
             match msg.style {
@@ -807,12 +883,9 @@ impl App {
                         ChatStyle::Welcome => unreachable!(),
                     };
 
-                    // Highlight background for message box
                     let msg_bg = Color::Rgb(29, 32, 47);
                     let line_style = Style::default().bg(msg_bg);
 
-                    // Left vertical bar to identify speaker
-                    // Note: No more string roles like "you" or "rot".
                     let bar_span = Span::styled("▌ ", Style::default().fg(role_color).bg(msg_bg));
 
                     let content_lines: Vec<&str> = msg.content.lines().collect();
@@ -845,19 +918,18 @@ impl App {
                         }
                     }
 
-                    // Add a [Copy] button indicator at the end of the message block
-                    let copy_span = Span::styled(
-                        " [Copy] ",
+                    // Copy hint (keyboard shortcut, not a clickable button)
+                    let copy_hint = Span::styled(
+                        " [y] copy ",
                         Style::default()
-                            .fg(COLOR_ACCENT)
-                            .bg(COLOR_CODE_BG)
-                            .bold(),
+                            .fg(COLOR_DIM)
+                            .bg(msg_bg),
                     );
                     lines.push(
                         Line::from(vec![
                             Span::styled(" ", Style::default().bg(msg_bg)),
                             bar_span.clone(),
-                            copy_span,
+                            copy_hint,
                         ])
                         .alignment(Alignment::Right)
                         .style(line_style),
@@ -868,7 +940,7 @@ impl App {
             }
         }
 
-        // Streaming text
+        // Streaming text - use consistent message box styling
         if !self.streaming_text.is_empty() {
             let msg_bg = Color::Rgb(29, 32, 47);
             let line_style = Style::default().bg(msg_bg);
@@ -903,21 +975,38 @@ impl App {
             ]));
         }
 
-        // No heavy box border — just a subtle bottom border for separation
         use ratatui::widgets::Padding;
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::horizontal(1));
 
-        // Auto-scroll + clamp
+        // Calculate accurate content height accounting for word wrap
         let inner_height = area.height;
-        let content_height = lines.len() as u16;
+        // Use actual available width after padding and message overhead
+        let usable_width = area.width.saturating_sub(MSG_OVERHEAD as u16).max(1);
+        
+        let mut content_height: u16 = 0;
+        for line in &lines {
+            let line_width = line.width() as u16;
+            if line_width == 0 {
+                content_height += 1;
+            } else if usable_width > 0 {
+                // Calculate how many lines this will wrap to (ceiling division)
+                let wrapped_lines = line_width.div_ceil(usable_width);
+                content_height += wrapped_lines;
+            } else {
+                content_height += 1;
+            }
+        }
+        
+        // Add small buffer for edge cases (unicode width variations, etc.)
+        content_height = content_height.saturating_add(2);
+
         self.max_scroll = content_height.saturating_sub(inner_height);
 
-        if self.auto_scroll && content_height > inner_height {
+        if self.auto_scroll {
             self.scroll_offset = self.max_scroll;
         }
-        // Clamp scroll to valid range
         self.scroll_offset = self.scroll_offset.min(self.max_scroll);
 
         let paragraph = Paragraph::new(lines)
@@ -927,15 +1016,25 @@ impl App {
 
         frame.render_widget(paragraph, area);
 
-        // Scroll indicators
+        // Scroll indicators - render in reserved space, not overlaying content
         if self.max_scroll > 0 {
             if self.scroll_offset > 0 {
-                let up_arrow = Paragraph::new(" ▲ ").style(Style::default().fg(COLOR_DIM).bg(COLOR_CODE_BG)).alignment(ratatui::layout::Alignment::Right);
-                frame.render_widget(up_arrow, Rect { x: area.x, y: area.y, width: area.width.saturating_sub(1), height: 1 });
+                let up_arrow = Paragraph::new(" ▲ ")
+                    .style(Style::default().fg(COLOR_DIM).bg(COLOR_BAR_BG))
+                    .alignment(ratatui::layout::Alignment::Right);
+                frame.render_widget(
+                    up_arrow,
+                    Rect { x: area.x, y: area.y, width: area.width, height: 1 },
+                );
             }
             if self.scroll_offset < self.max_scroll {
-                let down_arrow = Paragraph::new(" ▼ ").style(Style::default().fg(COLOR_ACCENT).bold().bg(COLOR_CODE_BG)).alignment(ratatui::layout::Alignment::Right);
-                frame.render_widget(down_arrow, Rect { x: area.x, y: area.y + area.height.saturating_sub(1), width: area.width.saturating_sub(1), height: 1 });
+                let down_arrow = Paragraph::new(" ▼ ")
+                    .style(Style::default().fg(COLOR_ACCENT).bold().bg(COLOR_BAR_BG))
+                    .alignment(ratatui::layout::Alignment::Right);
+                frame.render_widget(
+                    down_arrow,
+                    Rect { x: area.x, y: area.y + area.height.saturating_sub(1), width: area.width, height: 1 },
+                );
             }
         }
     }
@@ -958,6 +1057,7 @@ impl App {
             InputMode::Insert => "› ",
             InputMode::Normal => "  ",
         };
+        let prompt_len = prompt.chars().count() as u16;
 
         let block = Block::default()
             .borders(Borders::TOP)
@@ -988,19 +1088,58 @@ impl App {
             }
         }
 
-        let input_widget = Paragraph::new(lines).block(block);
+        // Calculate available width for text (area width - 2 padding)
+        let text_width = area.width.saturating_sub(2);
+
+        // Calculate cursor position accounting for visual line wrapping
+        // We need to count all visual lines up to the cursor position
+        let text_before_cursor = &self.input[..self.cursor_pos];
+        let mut cursor_y: u16 = 0;
+        let mut cursor_x: u16 = 0;
+
+        for (line_idx, line) in text_before_cursor.split('\n').enumerate() {
+            let line_chars = line.chars().count() as u16;
+            let prefix_width = if line_idx == 0 { prompt_len } else { 2 };
+            let available_width = text_width.saturating_sub(prefix_width).max(1);
+
+            if line_idx > 0 {
+                // Each newline adds one visual line
+                cursor_y += 1;
+            }
+
+            // Calculate how many visual lines this logical line takes
+            if line_chars == 0 {
+                cursor_x = prefix_width;
+            } else {
+                let n = line_chars - 1;
+                let visual_lines = n / available_width;
+                let pos_on_line = (n % available_width) + 1;
+                
+                cursor_y += visual_lines;
+                cursor_x = prefix_width + pos_on_line;
+            }
+        }
+
+        let visible_height = area.height.saturating_sub(1); // TOP border
+        let scroll_y = if cursor_y >= visible_height {
+            cursor_y.saturating_sub(visible_height) + 1
+        } else {
+            0
+        };
+
+        let input_widget = Paragraph::new(lines).block(block).scroll((scroll_y, 0));
         frame.render_widget(input_widget, area);
 
         // Cursor
         if self.input_mode == InputMode::Insert && self.state == AppState::Idle {
-            let text_before_cursor = &self.input[..self.cursor_pos];
-            let cursor_y = text_before_cursor.matches('\n').count() as u16;
-            let last_line = text_before_cursor.split('\n').last().unwrap_or("");
-            let cursor_x = last_line.chars().count() as u16;
-
-            let x = area.x + cursor_x + 3; // +1 padding +2 prompt
-            let y = area.y + 1 + cursor_y; // +1 because of TOP border thickness
-            frame.set_cursor_position(Position::new(x, y));
+            // Clamp cursor_x to visible area (leave 1 char margin for border)
+            let max_x = area.x + area.width.saturating_sub(2);
+            let x = (area.x + cursor_x + 1).min(max_x); // +1 for padding
+            let y = area.y + 1 + cursor_y.saturating_sub(scroll_y);
+            
+            if y > area.y && y < area.y + area.height {
+                frame.set_cursor_position(Position::new(x, y));
+            }
         }
     }
 
@@ -1015,7 +1154,6 @@ impl App {
             InputMode::Normal => COLOR_DIM,
         };
 
-        // Calculate context/token/cost stats
         let total_tokens = self.total_input_tokens + self.total_output_tokens;
         let context_window = get_context_window(&self.model);
         let avail_pct = if context_window > 0 {
@@ -1039,65 +1177,85 @@ impl App {
             COLOR_DIM
         };
 
-        let mcp_display = if self.mcp_count > 0 {
-            format!("  │  mcp:{}", self.mcp_count)
-        } else {
-            String::new()
-        };
-
-        // Left side: MODE │ provider:model │ agent (│ mcp:X) │ avail% │ tokens │ cost
-        let mut left = vec![
-            Span::styled(format!(" {mode_str} "), Style::default().fg(Color::Black).bg(mode_color).bold()),
-            Span::styled(
-                format!("  {}:{}", self.provider, self.model),
-                Style::default().fg(COLOR_BAR_FG),
-            ),
-            Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
-            Span::styled(
-                format!("@{}", self.agent),
-                Style::default().fg(COLOR_ACCENT),
-            ),
-            Span::styled(mcp_display, Style::default().fg(COLOR_TOOL)),
-            Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
-            Span::styled(
-                format!("{avail_pct:.0}% avail"),
-                Style::default().fg(pct_color),
-            ),
-            Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
-            Span::styled(
-                format!("{}tok", Self::format_number(total_tokens)),
-                Style::default().fg(COLOR_DIM),
-            ),
-        ];
-
-        if cost > 0.0001 {
-            left.push(Span::styled("  │  ", Style::default().fg(COLOR_BORDER)));
-            left.push(Span::styled(
-                format!("${cost:.4}"),
-                Style::default().fg(COLOR_DIM),
-            ));
-        }
-
         let access_str = match self.access_mode {
-            AccessMode::Default => " Default ",
-            AccessMode::Full => " Full ",
+            AccessMode::Default => "Default",
+            AccessMode::Full => "Full",
         };
         let access_color = match self.access_mode {
             AccessMode::Default => Color::Green,
             AccessMode::Full => Color::Red,
         };
 
-        let right_text = "/help ";
-        let access_box = format!("[Access:{access_str}]");
+        // Build footer adaptively based on available width
+        let mut left = vec![
+            Span::styled(format!(" {} ", mode_str), Style::default().fg(Color::Black).bg(mode_color).bold()),
+        ];
+
+        let available_width = area.width as usize;
         
-        let used: usize = left.iter().map(|s| s.width()).sum::<usize>() + right_text.len() + access_box.len();
-        let pad = (area.width as usize).saturating_sub(used);
+        // Always show provider:model if we have at least 40 chars
+        if available_width >= 40 {
+            left.push(Span::styled(
+                format!(" {}:{}", self.provider, self.model),
+                Style::default().fg(COLOR_BAR_FG),
+            ));
+        }
+        
+        // Show agent if we have at least 55 chars
+        if available_width >= 55 {
+            left.push(Span::styled(" │", Style::default().fg(COLOR_BORDER)));
+            left.push(Span::styled(
+                format!(" @{}", self.agent),
+                Style::default().fg(COLOR_ACCENT),
+            ));
+        }
+        
+        // Show MCP count if we have at least 70 chars and mcp_count > 0
+        if available_width >= 70 && self.mcp_count > 0 {
+            left.push(Span::styled(
+                format!(" │ mcp:{}", self.mcp_count),
+                Style::default().fg(COLOR_TOOL),
+            ));
+        }
+        
+        // Show context percentage if we have at least 85 chars
+        if available_width >= 85 {
+            left.push(Span::styled(" │", Style::default().fg(COLOR_BORDER)));
+            left.push(Span::styled(
+                format!(" {:>3.0}% avail", avail_pct),
+                Style::default().fg(pct_color),
+            ));
+        }
+        
+        // Show token count if we have at least 100 chars
+        if available_width >= 100 {
+            left.push(Span::styled(" │", Style::default().fg(COLOR_BORDER)));
+            left.push(Span::styled(
+                format!(" {}tok", Self::format_number(total_tokens)),
+                Style::default().fg(COLOR_DIM),
+            ));
+        }
+        
+        // Show cost if we have at least 115 chars and cost > 0
+        if available_width >= 115 && cost > 0.0001 {
+            left.push(Span::styled(" │", Style::default().fg(COLOR_BORDER)));
+            left.push(Span::styled(
+                format!(" ${cost:.4}"),
+                Style::default().fg(COLOR_DIM),
+            ));
+        }
+
+        // Right side: help hint and access mode
+        let right_str = "/help ";
+        let access_box = format!("[{}]", access_str);
+        
+        let used: usize = left.iter().map(|s| s.width()).sum();
+        let right_len = right_str.len() + access_box.len();
+        let pad = (area.width as usize).saturating_sub(used + right_len);
 
         left.push(Span::raw(" ".repeat(pad)));
-        left.push(Span::styled(right_text, Style::default().fg(COLOR_DIM)));
-        
-        // Render the access button
-        left.push(Span::styled("[Access:", Style::default().fg(COLOR_DIM)));
+        left.push(Span::styled(right_str, Style::default().fg(COLOR_DIM)));
+        left.push(Span::styled("[", Style::default().fg(COLOR_DIM)));
         left.push(Span::styled(access_str, Style::default().fg(Color::Black).bg(access_color).bold()));
         left.push(Span::styled("]", Style::default().fg(COLOR_DIM)));
 

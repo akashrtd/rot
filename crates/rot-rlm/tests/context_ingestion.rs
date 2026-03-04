@@ -81,10 +81,12 @@ async fn test_binary_file_rejected() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_pdf_preprocessing_success_with_extractor() {
-    let _guard = path_lock().lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let _fake = create_fake_pdftotext(dir.path());
+    
+    let _guard = path_lock().lock().unwrap();
     let _path_override = override_path(dir.path());
 
     let loaded = load_context(&fixture("sample.pdf")).await.unwrap();
@@ -93,9 +95,11 @@ async fn test_pdf_preprocessing_success_with_extractor() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_pdf_extractor_unavailable_path() {
-    let _guard = path_lock().lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
+    
+    let _guard = path_lock().lock().unwrap();
     let _path_override = override_path(dir.path());
 
     let err = load_context(&fixture("sample.pdf")).await.unwrap_err().to_string();
@@ -123,7 +127,7 @@ async fn test_invalid_utf8_text_regression_guard() {
 
     let mut bytes = vec![b'a'; 600];
     bytes.push(0xFF);
-    bytes.extend_from_slice(&[b'\n', b'b', b'\n']);
+    bytes.extend_from_slice(b"\nb\n");
     std::fs::write(&path, bytes).unwrap();
 
     let err = load_context(&path).await.unwrap_err().to_string();

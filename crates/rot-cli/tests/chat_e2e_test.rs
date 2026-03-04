@@ -127,7 +127,7 @@ fn test_chat_send_receive_and_persist_session() {
     // Search under temp root because dirs::data_dir() location can vary by platform.
     let sessions_root = temp.path();
     let created = wait_for_session_contents(
-        &sessions_root,
+        sessions_root,
         &["\"type\":\"session/start\""],
         Duration::from_secs(10),
     );
@@ -149,7 +149,7 @@ fn test_chat_send_receive_and_persist_session() {
     writer.flush().expect("flush prompt");
 
     let persisted = wait_for_session_contents(
-        &sessions_root,
+        sessions_root,
         &["hello from tui", "hello from mock provider"],
         Duration::from_secs(15),
     );

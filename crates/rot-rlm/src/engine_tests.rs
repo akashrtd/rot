@@ -136,8 +136,10 @@ async fn test_no_code_retry_path() {
         "```repl\nFINAL('after retry')\n```",
     ]);
 
-    let mut cfg = RlmConfig::default();
-    cfg.max_iterations = 4;
+    let cfg = RlmConfig {
+        max_iterations: 4,
+        ..Default::default()
+    };
 
     let mut engine = RlmEngine::new(cfg, agent);
     let report = engine.process_with_report("analyze", &ctx).await.unwrap();
@@ -200,8 +202,10 @@ async fn test_recursion_depth_exceeded() {
         "__ROT_SUBLM__{\"query\":\"inner\",\"input\":\"y\"}",
     ]);
 
-    let mut cfg = RlmConfig::default();
-    cfg.max_subcall_depth = 1;
+    let cfg = RlmConfig {
+        max_subcall_depth: 1,
+        ..Default::default()
+    };
 
     let mut engine = RlmEngine::new(cfg, agent);
     let err = engine.process_with_report("deep", &ctx).await.unwrap_err();
@@ -219,8 +223,10 @@ async fn test_timeout_exceeded() {
         "```repl\nimport time\ntime.sleep(0.05)\n```",
     ]);
 
-    let mut cfg = RlmConfig::default();
-    cfg.max_timeout = Some(std::time::Duration::from_millis(10));
+    let cfg = RlmConfig {
+        max_timeout: Some(std::time::Duration::from_millis(10)),
+        ..Default::default()
+    };
 
     let mut engine = RlmEngine::new(cfg, agent);
     let err = engine.process_with_report("slow", &ctx).await.unwrap_err();
@@ -239,8 +245,10 @@ async fn test_truncation_behavior() {
         "```repl\nFINAL('ok')\n```",
     ]);
 
-    let mut cfg = RlmConfig::default();
-    cfg.trace_max_chars = 7000;
+    let cfg = RlmConfig {
+        trace_max_chars: 7000,
+        ..Default::default()
+    };
 
     let mut engine = RlmEngine::new(cfg, agent);
     let report = engine.process_with_report("truncate", &ctx).await.unwrap();
@@ -268,8 +276,10 @@ async fn test_subcall_count_budget_exceeded() {
         "sub1",
     ]);
 
-    let mut cfg = RlmConfig::default();
-    cfg.max_subcalls = 1;
+    let cfg = RlmConfig {
+        max_subcalls: 1,
+        ..Default::default()
+    };
 
     let mut engine = RlmEngine::new(cfg, agent);
     let err = engine.process_with_report("budget", &ctx).await.unwrap_err();

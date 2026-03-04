@@ -2286,7 +2286,7 @@ dependencies = [
 
 [[package]]
 name = "rot-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2312,7 +2312,7 @@ dependencies = [
 
 [[package]]
 name = "rot-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "dirs",
@@ -2330,7 +2330,7 @@ dependencies = [
 
 [[package]]
 name = "rot-mcp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rot-sandbox",
  "serde",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "rot-plugin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -2354,7 +2354,7 @@ dependencies = [
 
 [[package]]
 name = "rot-provider"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "futures",
@@ -2371,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "rot-rlm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2394,7 +2394,7 @@ dependencies = [
 
 [[package]]
 name = "rot-sandbox"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "tempfile",
@@ -2404,7 +2404,7 @@ dependencies = [
 
 [[package]]
 name = "rot-serve"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -2419,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "rot-session"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "dirs",
@@ -2434,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "rot-tools"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "glob",
@@ -2455,7 +2455,7 @@ dependencies = [
 
 [[package]]
 name = "rot-tui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "arboard",
  "crossterm",
@@ -2468,6 +2468,7 @@ dependencies = [
  "rot-tools",
  "serde",
  "serde_json",
+ "textwrap",
  "tokio",
  "tracing",
 ]
@@ -2828,6 +2829,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
+name = "smawk"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
+
+[[package]]
 name = "socket2"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2955,6 +2962,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5d9cf598a6d7ce700a4e6a9199da127e6819a61e64b68609683cc9a01b5683a"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "textwrap"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057"
+dependencies = [
+ "smawk",
+ "unicode-linebreak",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -3235,6 +3253,12 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-linebreak"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
 
 [[package]]
 name = "unicode-segmentation"

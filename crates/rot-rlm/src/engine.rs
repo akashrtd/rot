@@ -571,8 +571,10 @@ mod tests {
             RuntimeSecurityConfig::default(),
         ));
 
-        let mut cfg = RlmConfig::default();
-        cfg.max_subcalls = 1;
+        let cfg = RlmConfig {
+            max_subcalls: 1,
+            ..Default::default()
+        };
 
         let mut engine = RlmEngine::new(cfg, agent);
         let dir = tempfile::tempdir().unwrap();

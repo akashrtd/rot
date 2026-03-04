@@ -198,7 +198,9 @@ impl Agent {
             })),
         };
 
+        tracing::debug!("Starting agent loop with max_iterations: {}", self.config.max_iterations);
         for _iteration in 0..self.config.max_iterations {
+            tracing::debug!("--- Iteration {} ---", _iteration);
             // Build provider request
             let provider_messages = self.convert_messages(messages);
             let tool_defs = self.build_tool_definitions();
@@ -221,7 +223,7 @@ impl Agent {
             let mut text_content = String::new();
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
             let mut current_tool: Option<PendingToolCall> = None;
-            let mut stop_reason = StopReason::EndTurn;
+            let mut _stop_reason = StopReason::EndTurn;
 
             while let Some(event) = stream.next().await {
                 let event = event.map_err(AgentProcessError::Provider)?;
@@ -230,6 +232,7 @@ impl Agent {
                 if let Some(ref cb) = self.on_event {
                     cb(&event);
                 }
+                tracing::trace!("Agent received event: {:?}", event);
 
                 match event {
                     StreamEvent::TextDelta { delta } => {
@@ -260,7 +263,7 @@ impl Agent {
                         if let Some(tc) = current_tool.take() {
                             tool_calls.push(tc);
                         }
-                        stop_reason = reason;
+                        _stop_reason = reason;
                         break;
                     }
                     _ => {}
@@ -302,6 +305,8 @@ impl Agent {
             for (idx, tc) in tool_calls.iter().enumerate() {
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.arguments).unwrap_or(serde_json::Value::Null);
+
+                tracing::debug!("Agent processing tool call: {} with args: {:?}", tc.name, args);
 
                 // Permission check
                 let (is_denied, requires_approval) = {
@@ -351,6 +356,7 @@ impl Agent {
                     let tool_msg = self
                         .execute_tool_call(tc.clone(), args, tool_ctx.clone())
                         .await;
+                    tracing::debug!("Tool {} result: {:?}", tc.name, tool_msg);
                     tool_messages.push((idx, tool_msg));
                 }
             }
@@ -370,9 +376,10 @@ impl Agent {
                 persist_message_to_session(&invocation.session_id, &tool_msg).await;
                 messages.push(tool_msg);
             }
-
+            tracing::debug!("Iteration {} completed.", _iteration);
             // Continue the loop — provider will see tool results
         }
+        tracing::debug!("Agent loop finished due to max iterations");
 
         Err(AgentProcessError::MaxIterations(
             self.config.max_iterations,

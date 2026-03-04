@@ -127,6 +127,12 @@ pub enum InputMode {
     Insert,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessMode {
+    Default,
+    Full,
+}
+
 pub struct App {
     pub state: AppState,
     pub input_mode: InputMode,
@@ -168,6 +174,8 @@ pub struct App {
     pub agent_menu_selected: usize,
     pub mcp_count: usize,
     pub clipboard: Option<Arc<Mutex<arboard::Clipboard>>>,
+    pub access_mode: AccessMode,
+    pub access_changed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -221,13 +229,15 @@ impl App {
             pending_approval_tx: None,
             rlm_enabled: false,
             rlm_iterating: false,
-            config_ui_state: ConfigUiState::default(),
+            config_ui_state: ConfigUiState::List(0),
             config_changed: false,
             agent_changed: false,
             slash_menu_selected: 0,
             agent_menu_selected: 0,
             mcp_count,
-            clipboard: arboard::Clipboard::new().ok().map(|c| Arc::new(Mutex::new(c))),
+            clipboard: arboard::Clipboard::new().map(|c| Arc::new(Mutex::new(c))).ok(),
+            access_mode: AccessMode::Default,
+            access_changed: false,
         }
     }
 
@@ -1068,12 +1078,28 @@ impl App {
             ));
         }
 
+        let access_str = match self.access_mode {
+            AccessMode::Default => " Default ",
+            AccessMode::Full => " Full ",
+        };
+        let access_color = match self.access_mode {
+            AccessMode::Default => Color::Green,
+            AccessMode::Full => Color::Red,
+        };
+
         let right_text = "/help ";
-        let used: usize = left.iter().map(|s| s.width()).sum::<usize>() + right_text.len();
+        let access_box = format!("[Access:{access_str}]");
+        
+        let used: usize = left.iter().map(|s| s.width()).sum::<usize>() + right_text.len() + access_box.len();
         let pad = (area.width as usize).saturating_sub(used);
 
         left.push(Span::raw(" ".repeat(pad)));
         left.push(Span::styled(right_text, Style::default().fg(COLOR_DIM)));
+        
+        // Render the access button
+        left.push(Span::styled("[Access:", Style::default().fg(COLOR_DIM)));
+        left.push(Span::styled(access_str, Style::default().fg(Color::Black).bg(access_color).bold()));
+        left.push(Span::styled("]", Style::default().fg(COLOR_DIM)));
 
         let bar = Paragraph::new(Line::from(left))
             .style(Style::default().bg(COLOR_BAR_BG));

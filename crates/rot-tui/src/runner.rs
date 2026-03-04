@@ -92,13 +92,13 @@ pub async fn run_tui(
     // We clone tx to use it inside the on_approval callback
     let approval_tx = tx.clone();
     let approval_tx_clone = approval_tx.clone();
-    let runtime_security_for_agent = runtime_security.clone();
+    let mut current_security = runtime_security.clone();
 
     let mut agent = build_agent(
         provider,
         tools.clone(),
         config.clone(),
-        runtime_security_for_agent,
+        current_security.clone(),
         session.id.clone(),
         approval_tx_clone.clone(),
     );
@@ -198,6 +198,46 @@ pub async fn run_tui(
             needs_redraw = true;
         }
 
+        // Check if access mode changed
+        if app.access_changed {
+            app.access_changed = false;
+            
+            current_security = match app.access_mode {
+                crate::app::AccessMode::Default => runtime_security.clone(),
+                crate::app::AccessMode::Full => rot_core::RuntimeSecurityConfig {
+                    sandbox_mode: rot_core::security::SandboxMode::DangerFullAccess,
+                    approval_policy: rot_core::security::ApprovalPolicy::Never,
+                    ..runtime_security.clone()
+                },
+            };
+
+            match create_provider(&app.provider, &app.model) {
+                Ok(new_provider) => {
+                    let config = agent_config(&app.agent, None);
+                    agent = build_agent(
+                        new_provider,
+                        tools.clone(),
+                        config,
+                        current_security.clone(),
+                        session.id.clone(),
+                        approval_tx.clone(),
+                    );
+                    app.push_chat(
+                        "system",
+                        &format!("Access mode changed to {:?}", app.access_mode),
+                        ChatStyle::System,
+                    );
+                }
+                Err(e) => {
+                    app.push_chat(
+                        "error",
+                        &format!("Failed to rebuild agent for access mode change: {}", e),
+                        ChatStyle::Error,
+                    );
+                }
+            }
+        }
+
         // Animate thinking dots
         if app.state == AppState::Thinking || app.state == AppState::Streaming {
             let old_tick = app.thinking_tick;
@@ -253,7 +293,7 @@ pub async fn run_tui(
                                             new_provider,
                                             tools.clone(),
                                             config,
-                                            runtime_security.clone(),
+                                            current_security.clone(),
                                             session.id.clone(),
                                             approval_tx.clone(),
                                         );
@@ -381,14 +421,16 @@ pub async fn run_tui(
                                                 let profile = AgentRegistry::get(&mentioned_agent)
                                                     .unwrap_or_else(AgentRegistry::default_agent);
                                                 let config = agent_config(profile.name, None);
+                                                let child_approval_tx = approval_tx.clone();
                                                 (
                                                     build_agent(
                                                         provider,
                                                         tools.clone(),
+                                                        // Pass shared configuration down to child
                                                         config,
-                                                        runtime_security.clone(),
+                                                        current_security.clone(),
                                                         session.id.clone(),
-                                                        approval_tx.clone(),
+                                                        child_approval_tx,
                                                     ),
                                                     prompt,
                                                     Some(profile.name.to_string()),
@@ -423,7 +465,7 @@ pub async fn run_tui(
                                 let input_owned = prompt_for_run.clone();
                                 let routed_agent_name = routed_agent_name.clone();
                                 let is_rlm = app.rlm_enabled;
-                                let rlm_security = runtime_security.clone();
+                                let rlm_security = current_security.clone();
                                 let allow_unsafe = allow_unsafe_rlm;
                                 let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
@@ -581,10 +623,16 @@ pub async fn run_tui(
                     app.insert_string(&content);
                 }
             }
-            TermEvent::MouseDown(_x, y) => {
+            TermEvent::MouseDown(x, y) => {
                 needs_redraw = true;
-                let height = terminal.size()?.height;
-                if y > 5 && y < height.saturating_sub(5) {
+                let size = terminal.size()?;
+                if y == size.height.saturating_sub(1) && x > size.width.saturating_sub(30) {
+                    app.access_mode = match app.access_mode {
+                        crate::app::AccessMode::Default => crate::app::AccessMode::Full,
+                        crate::app::AccessMode::Full => crate::app::AccessMode::Default,
+                    };
+                    app.access_changed = true;
+                } else if y > 5 && y < size.height.saturating_sub(5) {
                     if let Some(msg) = app.chat_lines.last() {
                         app.copy_to_clipboard(msg.content.clone());
                     }

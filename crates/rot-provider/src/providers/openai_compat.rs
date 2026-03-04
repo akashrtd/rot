@@ -99,15 +99,15 @@ impl OpenAiCompatProvider {
             if has_tool_results {
                 for block in &msg.content {
                     if let ProviderContent::ToolResult {
-                        tool_call_id,
                         content,
                         ..
                     } = block
                     {
+                        // Some OpenAI compatible models (like GLM-5) bug out when given "role": "tool".
+                        // We format the tool result as a user message instead.
                         messages.push(json!({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": content,
+                            "role": "user",
+                            "content": format!("Tool Result:\n\n{}", content),
                         }));
                     }
                 }
@@ -223,10 +223,11 @@ impl OpenAiCompatProvider {
             // Tool call deltas
             if let Some(ref tool_calls) = choice.delta.tool_calls {
                 for tc in tool_calls {
+                    let id = tc.id.clone().unwrap_or_default();
+                    
                     if let Some(ref func) = tc.function {
                         // If we have a function name, it's a new tool call
                         if let Some(ref name) = func.name {
-                            let id = tc.id.clone().unwrap_or_default();
                             events.push(StreamEvent::ToolCallStart {
                                 id: id.clone(),
                                 name: name.clone(),
@@ -236,7 +237,7 @@ impl OpenAiCompatProvider {
                         if let Some(ref args) = func.arguments {
                             if !args.is_empty() {
                                 events.push(StreamEvent::ToolCallDelta {
-                                    id: tc.id.clone().unwrap_or_default(),
+                                    id,
                                     delta: args.clone(),
                                 });
                             }
@@ -289,6 +290,7 @@ impl Provider for OpenAiCompatProvider {
         request: Request,
     ) -> Result<BoxStream<'_, Result<StreamEvent, ProviderError>>, ProviderError> {
         let body = self.build_request_body(request);
+        tracing::debug!("OpenAiCompat request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
         let url = format!("{}/chat/completions", self.config.base_url);
 
         let response = self

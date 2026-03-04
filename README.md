@@ -1,6 +1,6 @@
 # rot
 
-Recursive Operations Tool, an AI coding agent for the terminal.
+> Recursive Operations Tool, a next-generation AI coding agent for the terminal.
 
 ```text
  ███████████      ███████    ███████████
@@ -13,38 +13,36 @@ Recursive Operations Tool, an AI coding agent for the terminal.
 ░░░░░   ░░░░░    ░░░░░░░       ░░░░░
 ```
 
-## Overview
+**rot** makes AI-assisted coding accessible to every developer, regardless of their preferred LLM provider or environment constraints. It solves the fundamental limitation of AI context windows through **recursive intelligence**, handling massive codebases and document-heavy sessions with ease.
 
-`rot` is a Rust workspace for building and running a terminal-native coding agent.
+---
 
-Main capabilities:
-- Interactive TUI chat.
-- Single-shot `exec` mode for automation and CI.
-- Tool use (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `task`, `webfetch`).
-- Config-driven custom tools and MCP stdio servers.
-- Multi-provider model support (Anthropic, z.ai, OpenAI-compatible).
-- Session persistence.
-- Sandbox and approval policy controls.
+## ✨ Key Features
 
-## Installation
+- **Zero Setup & No Dependencies:** Shipped as a single, fast Rust binary. No Node.js, Bun, or Python environments to configure. Drop it onto any server or air-gapped machine and go.
+- **Infinite Context via RLM:** The Recursive Language Model (RLM) engine natively processes `10M+` token inputs by allowing the LLM to access, chunk, and summarize data recursively via an internal REPL environment.
+- **Provider Freedom:** Use the AI models you want. `rot` supports **Anthropic**, **OpenAI**, **Google (Gemini)**, **z.ai**, **OpenRouter**, and **Ollama** (for complete local privacy).
+- **Native Performance:** Written entirely in Rust, guaranteeing instant startup times, low idle memory usage, and rock-solid reliability.
+- **Rich Native Tools:** Comes with 16+ built-in semantic file tools (`codesearch`, `lsp`, `grep`, `glob`, `patch`), as well as native support for Custom Bash Tools and the **Model Context Protocol (MCP)**.
+- **Beautiful TUI:** Fully-featured terminal UI with Vim keybindings, side-by-side execution views, and streaming responses.
 
-### One-line installer
+---
+
+## 🚀 Installation
+
+### One-line installer (macOS / Linux)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/akashrtd/rot/main/install.sh | bash
 ```
 
-Optional installer flags:
+> **Options:**
+> Force reinstall with `ROT_FORCE=1`
+> Select a specific release version with `ROT_VERSION=v0.1.0`
 
-```bash
-# Install a tagged release
-ROT_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/akashrtd/rot/main/install.sh | bash
+### Build from source
 
-# Force reinstall
-ROT_FORCE=1 curl -fsSL https://raw.githubusercontent.com/akashrtd/rot/main/install.sh | bash
-```
-
-### From source
+Requires Rust `1.75+`.
 
 ```bash
 git clone https://github.com/akashrtd/rot.git
@@ -54,336 +52,145 @@ cargo install --path crates/rot-cli
 
 ### Prerequisites
 
-- Rust 1.75+ (`cargo` on PATH)
-- At least one provider API key
+At least one provider API key exported in your environment (unless exclusively using Ollama locally).
 
 ```bash
-export ANTHROPIC_API_KEY=...
-# or
-export ZAI_API_KEY=...
-# or
-export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY="sk-ant-..."
+# OR
+export OPENAI_API_KEY="sk-proj-..."
+# OR
+export GOOGLE_API_KEY="..."
 ```
 
-### Verify install
+---
 
-```bash
-rot --version
-rot --help
-```
+## 💻 Usage
 
-If `rot` is not found right away:
+### Interactive TUI (Chat Mode)
 
-```bash
-source "${CARGO_HOME:-$HOME/.cargo}/env"
-```
-
-## Quick Start
+Fire up the beautiful TUI and start pair programming:
 
 ```bash
 rot
 ```
 
-Basic alternatives:
+Want to use a specific provider or model?
 
 ```bash
-rot --provider zai
 rot --provider openai --model gpt-4o
 rot --provider ollama --model llama3.1
-rot -v
+rot --provider zai
 ```
 
-## Usage
+**TUI Keybindings:**
 
-### Interactive chat
+- `Enter`: Send message
+- `Shift+Enter`: Newline
+- `Esc`: Switch to Normal mode
+- `i`: Switch to Insert mode
+- `j` / `Down` & `k` / `Up`: Scroll up and down
+- `q` / `Ctrl+C`: Quit
+- `/`: Open Slash command popup (type `/tools` to inspect built-in tools)
 
-```bash
-rot
-```
+### Single-shot Execution (CI / Automation)
 
-### Single-shot execution
+Execute a quick task and exit—perfect for scripts or git hooks.
 
 ```bash
 rot exec "read main.rs and summarize architecture"
-rot exec "find all TODO comments"
-rot exec "write a unit test for parser.rs"
-rot exec "continue from previous state" --session <ID>
-rot exec "try an alternative approach" --session <ID> --fork
+rot exec "find all TODO comments in the workspace and print them"
+rot --provider anthropic exec "write a unit test for parser.rs"
 ```
 
-### Session commands
+### The RLM Engine (Massive Contexts)
+
+When dealing with giant repositories or massive documents, RLM treats standard LLM limits as a thing of the past.
 
 ```bash
-rot session list
-rot session resume <ID>
-rot session tree <ID>
+rot exec --rlm --context ./spec.pdf "extract the core requirements"
+rot exec --rlm --rlm-runtime bash --context ./architecture.md "analyze the design"
+```
+
+_(Note: PDF processing requires `pdftotext` to be installed on your system)._
+
+### Session Management
+
+`rot` saves your sessions efficiently via JSONL. You don't lose context between working days.
+
+```bash
+rot session list             # View recent sessions
+rot session resume <ID>      # Jump back in
+rot session tree <ID>        # View context tree
 rot session export <ID> ./session.jsonl
-rot session import ./session.jsonl
 ```
 
-### Tool inspection
+### Headless Server Mode
+
+`rot` can act as its own headless service for local integrations:
 
 ```bash
-rot tools
-rot tools read
-rot tools mcp__filesystem__read_file
-```
-
-### Provider and model discovery
-
-```bash
-rot providers
-rot models
-rot --provider openrouter models
-```
-
-### Headless service mode
-
-```bash
-rot serve
 rot serve --host 0.0.0.0 --port 7878
 ```
 
-## Security and Approval
+---
 
-Global flags:
+## 🛠️ Configuration & MCP
+
+Your global configuration lives at `~/.rot/config.json`. This is where you configure security approvals, custom tools, default providers, and MCP servers.
+
+### Security and Approvals
+
+`rot` takes safety seriously. By default, the sandbox network access is off and approvals are required for destructive actions.
+
+You can modify sandbox and approval policies via config or flags:
 
 ```bash
 rot --sandbox <read-only|workspace-write|danger-full-access>
 rot --ask-for-approval <untrusted|on-request|never>
 ```
 
-Shortcuts:
+_(Shortcuts for the bold: `rot --yolo` or `rot --full-auto`)_
 
-```bash
-rot --full-auto
-rot --dangerously-bypass-approvals-and-sandbox
-rot --yolo
-```
+### MCP (Model Context Protocol)
 
-Defaults:
-- `sandbox_mode=workspace-write`
-- `approval_policy=on-request`
-- `sandbox_network_access=false`
-
-In non-interactive `exec`, approval is forced to `never`.
-
-External tool behavior:
-- Custom command tools run under the active sandbox at call time.
-- MCP stdio servers start under the active sandbox at startup.
-- MCP tools are exported as `mcp__<server>__<tool>`.
-- Under `untrusted` and `on-request`, MCP tools require approval by default.
-
-## Exec Automation Output
-
-Machine output modes:
-
-```bash
-# JSONL event stream
-rot exec "summarize repository status" --json
-
-# Single JSON object
-rot exec "summarize repository status" --final-json
-```
-
-Output schema validation:
-
-```bash
-rot exec "return valid JSON" --final-json --output-schema ./schema.json
-```
-
-Exit codes:
-- `0` success
-- `1` runtime or tool failure
-- `2` output schema validation failure
-
-## RLM Mode
-
-Use Recursive Language Model mode for large context analysis:
-
-```bash
-rot exec --rlm --context ./spec.pdf "extract requirements"
-rot exec --rlm --rlm-runtime bash --context ./spec.pdf "use bash runtime"
-rot exec --rlm --rlm-isolation docker --rlm-docker-image python:3.11-slim --context ./spec.pdf "run in docker"
-```
-
-RLM safety:
-- RLM inherits sandbox/network policy from the parent command.
-- In danger mode (`--yolo`), add `--allow-unsafe-rlm` to run RLM explicitly.
-
-## TUI Keybindings
-
-Insert mode:
-- `Enter` send message
-- `Shift+Enter` newline
-- `Esc` switch to normal mode
-
-Normal mode:
-- `i` switch to insert mode
-- `j` / `Down` scroll down
-- `k` / `Up` scroll up
-- `G` jump to bottom
-- `q` quit
-
-Any mode:
-- `Ctrl+C` quit
-
-Slash command popup:
-- Type `/` at the start of the input.
-- Use `Up`/`Down` to select.
-- Press `Enter` to run selected command.
-
-Tool inspection in the TUI:
-- `/tools` lists loaded tools
-- `/tool <name>` shows one tool schema
-
-## Built-in Tools
-
-| Tool | Purpose |
-| --- | --- |
-| `read` | Read file contents with offset/limit |
-| `list` | List files and directories |
-| `codesearch` | Ranked code-aware workspace search |
-| `lsp` | Experimental LSP-style lookup with fallback |
-| `write` | Create or overwrite files |
-| `edit` | Exact string replacement in files |
-| `patch` | Apply deterministic multi-hunk edits |
-| `question` | Ask structured clarification questions |
-| `todoread` | Read structured task state |
-| `todowrite` | Update structured task state |
-| `bash` | Execute shell commands |
-| `glob` | Find files by pattern |
-| `grep` | Regex search across files |
-| `task` | Delegate work to a built-in subagent |
-| `webfetch` | Fetch URL content |
-| `websearch` | Search the web for concise results |
-
-## Configuration
-
-Global config lives at `~/.rot/config.json`.
-
-Example:
+`rot` ships with native stdio MCP support. Add an MCP server directly in `config.json`:
 
 ```json
 {
-  "provider": "anthropic",
-  "model": "claude-3-5-sonnet-latest",
-  "approval_policy": "on-request",
-  "sandbox_mode": "workspace-write",
-  "sandbox_network_access": false,
-  "api_keys": {
-    "anthropic": "sk-ant-..."
-  },
-  "custom_tools": [
-    {
-      "name": "echo_args",
-      "description": "Echo the raw JSON arguments",
-      "command": "cat \"$ROT_TOOL_ARGS_FILE\"",
-      "parameters_schema": {
-        "type": "object",
-        "properties": {
-          "text": { "type": "string" }
-        }
-      },
-      "timeout_secs": 30
-    }
-  ],
   "mcp_servers": [
     {
       "name": "filesystem",
       "enabled": true,
       "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "."
-      ],
-      "cwd": ".",
-      "env": {},
-      "startup_timeout_secs": 20,
-      "tool_timeout_secs": 60
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
     }
   ]
 }
 ```
 
-Custom tool command contract:
-- `ROT_TOOL_NAME`
-- `ROT_TOOL_ARGS_FILE`
-- `ROT_TOOL_ARGS_JSON`
-- `ROT_SESSION_ID`
+---
 
-MCP scope in this release:
-- stdio transport only
-- protocol version `2025-06-18`
-- startup discovery through `tools/list`
-- tool invocation through `tools/call`
-- per-server `enabled` flag
-- optional per-server `cwd`
+## 🏗️ Development
 
-## Providers
-
-Configured providers:
-- Anthropic
-- z.ai
-- OpenAI
-- Ollama
-- OpenRouter
-- Google
-
-Provider selection:
+`rot` is composed of several localized crates (`rot-core`, `rot-rlm`, `rot-tui`, etc.).
 
 ```bash
-rot --provider anthropic
-rot --provider zai
-rot --provider openai
-rot --provider ollama
-rot --provider openrouter
-rot --provider google
-```
-
-Serve mode API is documented in [`docs/serve.md`](docs/serve.md).
-
-## Workspace Layout
-
-```text
-crates/
-  rot-cli       # binary entrypoint and CLI parsing
-  rot-core      # agent loop, security policy, messages
-  rot-mcp       # MCP stdio client
-  rot-provider  # provider trait + provider implementations
-  rot-tools     # built-in tools
-  rot-sandbox   # shell sandbox backends
-  rot-session   # session persistence
-  rot-tui       # terminal UI
-  rot-rlm       # recursive language model engine
-  rot-plugin    # plugin crate
-```
-
-## Development
-
-Build:
-
-```bash
+# Debug build
 cargo build
-cargo build --release
-```
 
-Test:
-
-```bash
+# Run tests
 cargo test
 cargo test -p rot-core
-cargo test -p rot-tools
-```
 
-Lint and format:
-
-```bash
+# Lint
 cargo clippy -- -D warnings
 cargo fmt -- --check
 ```
 
-## License
+See [AGENTS.md](AGENTS.md) and [architecture.md](architecture.md) for deeper technical contexts if you're looking to contribute!
 
-MIT
+---
+
+## 📜 License
+
+MIT License. See [LICENSE](LICENSE) for details.

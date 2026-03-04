@@ -284,6 +284,8 @@ pub async fn run_tui(
                         KeyCode::Enter => {
                             let changed = app.select_current_agent();
                             if changed {
+                                app.is_switching_agent = true;
+                                needs_redraw = true;
                                 match create_provider(&app.provider, &app.model) {
                                     Ok(new_provider) => {
                                         let profile = AgentRegistry::get(&app.agent)
@@ -311,6 +313,7 @@ pub async fn run_tui(
                                         );
                                     }
                                 }
+                                app.is_switching_agent = false;
                             }
                         }
                         KeyCode::Esc => app.state = AppState::Idle,
@@ -324,6 +327,8 @@ pub async fn run_tui(
 
                     if app.config_changed {
                         app.config_changed = false;
+                        app.is_switching_model = true;
+                        needs_redraw = true;
                                 match create_provider(&app.provider, &app.model) {
                                     Ok(new_provider) => {
                                         let config = agent_config(&app.agent, None);
@@ -349,6 +354,7 @@ pub async fn run_tui(
                                 );
                             }
                         }
+                        app.is_switching_model = false;
                     }
                     continue;
                 }
@@ -565,6 +571,11 @@ pub async fn run_tui(
                                 });
                             }
                             KeyCode::Backspace => app.backspace(),
+                            KeyCode::Delete => app.delete_char(),
+                            KeyCode::Left => app.cursor_left(),
+                            KeyCode::Right => app.cursor_right(),
+                            KeyCode::Home => app.cursor_home(),
+                            KeyCode::End => app.cursor_end(),
                             KeyCode::Up => {
                                 if app.is_slash_menu_active() {
                                     app.move_slash_selection_up();

@@ -625,6 +625,49 @@ impl App {
         }
     }
 
+    pub fn delete_char(&mut self) {
+        if self.cursor_pos < self.input.len() {
+            self.input.remove(self.cursor_pos);
+            self.sync_slash_menu_selection();
+        }
+    }
+
+    pub fn cursor_left(&mut self) {
+        if self.cursor_pos > 0 {
+            self.cursor_pos = self.input[..self.cursor_pos]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+        }
+    }
+
+    pub fn cursor_right(&mut self) {
+        if self.cursor_pos < self.input.len() {
+            self.cursor_pos += self.input[self.cursor_pos..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(0);
+        }
+    }
+
+    pub fn cursor_home(&mut self) {
+        if let Some(pos) = self.input[..self.cursor_pos].rfind('\n') {
+            self.cursor_pos = pos + 1;
+        } else {
+            self.cursor_pos = 0;
+        }
+    }
+
+    pub fn cursor_end(&mut self) {
+        if let Some(pos) = self.input[self.cursor_pos..].find('\n') {
+            self.cursor_pos += pos;
+        } else {
+            self.cursor_pos = self.input.len();
+        }
+    }
+
     pub fn is_slash_menu_active(&self) -> bool {
         self.state == AppState::Idle
             && self.input_mode == InputMode::Insert

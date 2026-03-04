@@ -9,6 +9,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
 
 // ── Theme (Tokyo Night) ───────────────────────────────────────────────
 
@@ -166,6 +167,7 @@ pub struct App {
     pub slash_menu_selected: usize,
     pub agent_menu_selected: usize,
     pub mcp_count: usize,
+    pub clipboard: Option<Arc<Mutex<arboard::Clipboard>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +227,17 @@ impl App {
             slash_menu_selected: 0,
             agent_menu_selected: 0,
             mcp_count,
+            clipboard: arboard::Clipboard::new().ok().map(|c| Arc::new(Mutex::new(c))),
+        }
+    }
+
+    pub fn copy_to_clipboard(&mut self, text: String) {
+        if let Some(clipboard) = &self.clipboard {
+            if let Ok(mut cb) = clipboard.lock() {
+                if cb.set_text(text).is_ok() {
+                    self.status = "Copied to clipboard!".to_string();
+                }
+            }
         }
     }
 
@@ -791,7 +804,7 @@ impl App {
                         lines.push(
                             Line::from(vec![
                                 Span::styled(" ", Style::default().bg(msg_bg)),
-                                bar_span,
+                                bar_span.clone(),
                             ])
                             .style(line_style),
                         );
@@ -815,6 +828,25 @@ impl App {
                             lines.push(Line::from(spans).style(line_style));
                         }
                     }
+
+                    // Add a [Copy] button indicator at the end of the message block
+                    let copy_span = Span::styled(
+                        " [Copy] ",
+                        Style::default()
+                            .fg(COLOR_ACCENT)
+                            .bg(COLOR_CODE_BG)
+                            .bold(),
+                    );
+                    lines.push(
+                        Line::from(vec![
+                            Span::styled(" ", Style::default().bg(msg_bg)),
+                            bar_span.clone(),
+                            copy_span,
+                        ])
+                        .alignment(Alignment::Right)
+                        .style(line_style),
+                    );
+
                     lines.push(Line::from(""));
                 }
             }

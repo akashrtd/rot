@@ -546,8 +546,22 @@ pub async fn run_tui(
                             KeyCode::Char('G') => {
                                 app.auto_scroll = true;
                             }
+                            KeyCode::Char('y') => {
+                                if let Some(msg) = app.chat_lines.last() {
+                                    app.copy_to_clipboard(msg.content.clone());
+                                }
+                            }
                             _ => {}
                         },
+                    }
+                }
+            }
+            TermEvent::MouseDown(_x, y) => {
+                needs_redraw = true;
+                let height = terminal.size()?.height;
+                if y > 5 && y < height.saturating_sub(5) {
+                    if let Some(msg) = app.chat_lines.last() {
+                        app.copy_to_clipboard(msg.content.clone());
                     }
                 }
             }

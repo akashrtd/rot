@@ -10,6 +10,8 @@ pub enum TermEvent {
     Key(KeyEvent),
     /// Mouse scroll.
     MouseScroll(i16),
+    /// Mouse down.
+    MouseDown(u16, u16),
     /// Terminal was resized.
     Resize(u16, u16),
     /// No event (tick).
@@ -24,6 +26,7 @@ pub fn poll_event(timeout: Duration) -> std::io::Result<TermEvent> {
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::ScrollUp => Ok(TermEvent::MouseScroll(-3)),
                 MouseEventKind::ScrollDown => Ok(TermEvent::MouseScroll(3)),
+                MouseEventKind::Down(_) => Ok(TermEvent::MouseDown(mouse.column, mouse.row)),
                 _ => Ok(TermEvent::Tick),
             },
             Event::Resize(w, h) => Ok(TermEvent::Resize(w, h)),

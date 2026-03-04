@@ -165,6 +165,7 @@ pub struct App {
     pub agent_changed: bool,
     pub slash_menu_selected: usize,
     pub agent_menu_selected: usize,
+    pub mcp_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -188,7 +189,7 @@ pub enum ChatStyle {
 // ── App Implementation ─────────────────────────────────────────────────
 
 impl App {
-    pub fn new(model: &str, provider: &str, agent: &str) -> Self {
+    pub fn new(model: &str, provider: &str, agent: &str, mcp_count: usize) -> Self {
         Self {
             state: AppState::Idle,
             input_mode: InputMode::Insert,
@@ -223,6 +224,7 @@ impl App {
             agent_changed: false,
             slash_menu_selected: 0,
             agent_menu_selected: 0,
+            mcp_count,
         }
     }
 
@@ -921,10 +923,10 @@ impl App {
         // Calculate context/token/cost stats
         let total_tokens = self.total_input_tokens + self.total_output_tokens;
         let context_window = get_context_window(&self.model);
-        let context_pct = if context_window > 0 {
-            (total_tokens as f64 / context_window as f64 * 100.0).min(100.0)
+        let avail_pct = if context_window > 0 {
+            (100.0 - (total_tokens as f64 / context_window as f64 * 100.0)).max(0.0)
         } else {
-            0.0
+            100.0
         };
         let cost = if self.provider == "anthropic" {
             (self.total_input_tokens as f64 * 3.0 / 1_000_000.0)
@@ -934,15 +936,21 @@ impl App {
                 + (self.total_output_tokens as f64 * 0.5 / 1_000_000.0)
         };
 
-        let pct_color = if context_pct > 80.0 {
+        let pct_color = if avail_pct < 20.0 {
             COLOR_ERROR
-        } else if context_pct > 50.0 {
+        } else if avail_pct < 50.0 {
             COLOR_SYSTEM
         } else {
             COLOR_DIM
         };
 
-        // Left side: MODE │ provider:model │ agent │ context% │ tokens │ cost
+        let mcp_display = if self.mcp_count > 0 {
+            format!("  │  mcp:{}", self.mcp_count)
+        } else {
+            String::new()
+        };
+
+        // Left side: MODE │ provider:model │ agent (│ mcp:X) │ avail% │ tokens │ cost
         let mut left = vec![
             Span::styled(format!(" {mode_str} "), Style::default().fg(Color::Black).bg(mode_color).bold()),
             Span::styled(
@@ -954,9 +962,10 @@ impl App {
                 format!("@{}", self.agent),
                 Style::default().fg(COLOR_ACCENT),
             ),
+            Span::styled(mcp_display, Style::default().fg(COLOR_TOOL)),
             Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
             Span::styled(
-                format!("{context_pct:.0}%"),
+                format!("{avail_pct:.0}% avail"),
                 Style::default().fg(pct_color),
             ),
             Span::styled("  │  ", Style::default().fg(COLOR_BORDER)),
@@ -1380,7 +1389,7 @@ mod tests {
 
     #[test]
     fn test_app_creation() {
-        let app = App::new("claude-sonnet-4-20250514", "anthropic", "default");
+        let app = App::new("claude-sonnet-4-20250514", "anthropic", "default", 0);
         assert_eq!(app.state, AppState::Idle);
         assert!(app.running);
         assert!(app.input.is_empty());
@@ -1389,7 +1398,7 @@ mod tests {
 
     #[test]
     fn test_input_editing() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.insert_char('h');
         app.insert_char('i');
         assert_eq!(app.input, "hi");
@@ -1401,7 +1410,7 @@ mod tests {
 
     #[test]
     fn test_submit_input() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.insert_char('h');
         app.insert_char('i');
         let text = app.submit_input();
@@ -1411,7 +1420,7 @@ mod tests {
 
     #[test]
     fn test_push_chat() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.push_chat("user", "Hello!", ChatStyle::User);
         assert_eq!(app.chat_lines.len(), 1);
         assert!(app.auto_scroll);
@@ -1419,7 +1428,7 @@ mod tests {
 
     #[test]
     fn test_auto_scroll_on_push() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.auto_scroll = false;
         app.push_chat("user", "Hello!", ChatStyle::User);
         assert!(app.auto_scroll);
@@ -1427,14 +1436,14 @@ mod tests {
 
     #[test]
     fn test_slash_help() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         assert!(app.handle_slash_command("/help"));
         assert_eq!(app.chat_lines.len(), 1);
     }
 
     #[test]
     fn test_slash_clear() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.push_chat("user", "test", ChatStyle::User);
         assert!(app.handle_slash_command("/clear"));
         assert_eq!(app.chat_lines.len(), 1);
@@ -1442,20 +1451,20 @@ mod tests {
 
     #[test]
     fn test_slash_unknown() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         assert!(app.handle_slash_command("/foo"));
         assert!(app.chat_lines[0].content.contains("Unknown"));
     }
 
     #[test]
     fn test_non_slash() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         assert!(!app.handle_slash_command("hello"));
     }
 
     #[test]
     fn test_multi_line() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.insert_char('a');
         app.insert_newline();
         app.insert_char('b');
@@ -1476,7 +1485,7 @@ mod tests {
 
     #[test]
     fn test_tokens() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.record_tokens(100, 50);
         assert_eq!(app.total_input_tokens, 100);
         app.record_tokens(200, 100);
@@ -1492,7 +1501,7 @@ mod tests {
 
     #[test]
     fn test_welcome_once() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.show_welcome();
         let n = app.chat_lines.len();
         app.show_welcome();
@@ -1508,7 +1517,7 @@ mod tests {
 
     #[test]
     fn test_slash_menu_active_and_filtered() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.input = "/m".to_string();
         app.cursor_pos = app.input.len();
         let items = app.filtered_slash_commands();
@@ -1519,7 +1528,7 @@ mod tests {
 
     #[test]
     fn test_slash_selection_wraps() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.input = "/".to_string();
         app.cursor_pos = 1;
         app.sync_slash_menu_selection();
@@ -1534,27 +1543,27 @@ mod tests {
 
     #[test]
     fn test_slash_agents_opens_dialog() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         assert!(app.handle_slash_command("/agents"));
         assert_eq!(app.state, AppState::Agents);
     }
 
     #[test]
     fn test_slash_tree_is_reserved_for_runner_inspection() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         assert!(!app.handle_slash_command("/tree"));
     }
 
     #[test]
     fn test_slash_tools_is_reserved_for_runner_inspection() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         assert!(!app.handle_slash_command("/tools"));
         assert!(!app.handle_slash_command("/tool read"));
     }
 
     #[test]
     fn test_select_current_agent_updates_active_agent() {
-        let mut app = App::new("test", "test", "default");
+        let mut app = App::new("test", "test", "default", 0);
         app.state = AppState::Agents;
         app.agent_menu_selected = app
             .all_agents()

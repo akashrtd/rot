@@ -64,7 +64,10 @@ pub async fn run_tui(
     stdout().execute(EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    let mut app = App::new(model, provider_name, agent_name);
+    let config_store = rot_core::config::ConfigStore::new();
+    let mcp_count = config_store.load().mcp_servers.iter().filter(|s| s.enabled).count();
+
+    let mut app = App::new(model, provider_name, agent_name, mcp_count);
 
     // Show welcome banner
     app.show_welcome();
@@ -81,8 +84,6 @@ pub async fn run_tui(
 
     // Channel for agent results
     let (tx, mut rx) = mpsc::unbounded_channel::<AgentEvent>();
-
-    let config_store = rot_core::config::ConfigStore::new();
 
     // We clone tx to use it inside the on_approval callback
     let approval_tx = tx.clone();

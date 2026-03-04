@@ -19,15 +19,14 @@ pub async fn run(
         agent_profile.system_prompt.to_string()
     };
 
-    // If no provider or model were specified, fall back to the config store
+    // If no provider was specified, fall back to config store.
     let final_provider = if provider_name.is_empty() {
         &config.provider
     } else {
         provider_name
     };
 
-    let final_model = model.unwrap_or(&config.model);
-    let provider = crate::provider_factory::create_provider(final_provider, Some(final_model), true)?;
+    let provider = crate::provider_factory::create_provider(final_provider, model, true)?;
     let model_name = provider.current_model().to_string();
 
     let session_store = SessionStore::new();

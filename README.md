@@ -72,6 +72,12 @@ rot --version
 rot --help
 ```
 
+If `rot` is not found right away:
+
+```bash
+source "${CARGO_HOME:-$HOME/.cargo}/env"
+```
+
 ## Quick Start
 
 ```bash

@@ -39,6 +39,10 @@ enum AgentEvent {
     Error(String),
     /// Iterative progress update from background task.
     Progress(String),
+    /// Streaming text emitted by provider callbacks.
+    StreamTextDelta(String),
+    /// Streaming thinking emitted by provider callbacks.
+    StreamThinkingDelta(String),
 }
 
 /// Run the TUI application.
@@ -151,6 +155,29 @@ pub async fn run_tui(
                 }
                 AgentEvent::Progress(_msg) => {
                     app.rlm_iterating = true;
+                }
+                AgentEvent::StreamTextDelta(delta) => {
+                    if app.state == AppState::Thinking {
+                        app.state = AppState::Streaming;
+                        app.status = "Streaming...".to_string();
+                    }
+                    app.streaming_text.push_str(&delta);
+                }
+                AgentEvent::StreamThinkingDelta(delta) => {
+                    if app.state == AppState::Thinking {
+                        app.state = AppState::Streaming;
+                        app.status = "Streaming...".to_string();
+                    }
+                    if !delta.trim().is_empty() {
+                        if !app.streaming_text.is_empty() && !app.streaming_text.ends_with('\n') {
+                            app.streaming_text.push('\n');
+                        }
+                        app.streaming_text.push_str("… ");
+                        app.streaming_text.push_str(&delta);
+                        if !app.streaming_text.ends_with('\n') {
+                            app.streaming_text.push('\n');
+                        }
+                    }
                 }
             }
         }
@@ -928,11 +955,22 @@ fn build_agent(
     config: AgentConfig,
     runtime_security: rot_core::RuntimeSecurityConfig,
     session_id: String,
-    approval_tx: mpsc::UnboundedSender<AgentEvent>,
+    event_tx: mpsc::UnboundedSender<AgentEvent>,
 ) -> Arc<Agent> {
+    let stream_tx = event_tx.clone();
+    let approval_tx = event_tx.clone();
     Arc::new(
         Agent::new(provider, tools, config, runtime_security)
             .with_session_id(session_id)
+            .on_event(Box::new(move |event| match event {
+                rot_provider::StreamEvent::TextDelta { delta } => {
+                    let _ = stream_tx.send(AgentEvent::StreamTextDelta(delta.clone()));
+                }
+                rot_provider::StreamEvent::ThinkingDelta { delta } => {
+                    let _ = stream_tx.send(AgentEvent::StreamThinkingDelta(delta.clone()));
+                }
+                _ => {}
+            }))
             .on_approval(Box::new(move |tool_name, args| {
                 let tx_clone = approval_tx.clone();
                 let tool_name = tool_name.to_string();

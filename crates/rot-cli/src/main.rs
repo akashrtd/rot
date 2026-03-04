@@ -23,12 +23,21 @@ async fn main() -> anyhow::Result<()> {
             .init();
     }
 
+    let provider_from_config = config.provider.as_str();
+    let explicit_provider = cli.provider.is_some();
+    let effective_provider = cli.provider.as_deref().unwrap_or(provider_from_config);
+    let effective_model = match cli.model.as_deref() {
+        Some(model) => Some(model),
+        None if explicit_provider => None,
+        None => Some(config.model.as_str()),
+    };
+
     match cli.command {
         None | Some(Commands::Chat) => {
             let security = cli.resolve_runtime_security(&config);
             commands::chat::run(
-                cli.model.as_deref(),
-                &cli.provider,
+                effective_model,
+                effective_provider,
                 cli.agent.as_deref(),
                 security,
                 cli.allow_unsafe_rlm,
@@ -57,8 +66,8 @@ async fn main() -> anyhow::Result<()> {
             let machine_output = options.json || options.final_json;
             if let Err(err) = commands::exec::run(
                 prompt,
-                cli.model.as_deref(),
-                &cli.provider,
+                effective_model,
+                effective_provider,
                 cli.agent.as_deref(),
                 session.as_deref(),
                 fork,
@@ -147,14 +156,14 @@ async fn main() -> anyhow::Result<()> {
             commands::providers::run()?;
         }
         Some(Commands::Models) => {
-            commands::models::run(&cli.provider)?;
+            commands::models::run(effective_provider)?;
         }
         Some(Commands::Serve { ref host, port }) => {
             let security = cli.resolve_runtime_security_for_exec(&config)?;
             rot_serve::run(rot_serve::ServeOptions {
                 bind: format!("{host}:{port}"),
-                provider: cli.provider.clone(),
-                model: cli.model.clone(),
+                provider: effective_provider.to_string(),
+                model: effective_model.map(str::to_string),
                 agent: cli.agent.clone(),
                 runtime_security: security,
             })

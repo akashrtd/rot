@@ -73,8 +73,8 @@ impl From<RlmIsolationArg> for RlmIsolationKind {
 #[command(name = "rot", version, about = "Recursive Operations Tool — AI coding agent")]
 pub struct Cli {
     /// LLM provider to use.
-    #[arg(long, default_value = "anthropic", global = true)]
-    pub provider: String,
+    #[arg(long, global = true)]
+    pub provider: Option<String>,
 
     /// Built-in agent profile to use.
     #[arg(long, global = true)]
@@ -394,6 +394,18 @@ mod tests {
     fn test_models_command_parses() {
         let parsed = Cli::try_parse_from(["rot", "models"]).unwrap();
         assert!(matches!(parsed.command, Some(Commands::Models)));
+    }
+
+    #[test]
+    fn test_provider_is_unset_by_default() {
+        let parsed = Cli::try_parse_from(["rot", "models"]).unwrap();
+        assert!(parsed.provider.is_none());
+    }
+
+    #[test]
+    fn test_provider_flag_parses() {
+        let parsed = Cli::try_parse_from(["rot", "--provider", "openai", "models"]).unwrap();
+        assert_eq!(parsed.provider.as_deref(), Some("openai"));
     }
 
     #[test]

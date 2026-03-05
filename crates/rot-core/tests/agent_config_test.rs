@@ -1,4 +1,4 @@
-use rot_core::{AgentConfig, AgentProcessError, TaskExecutionPolicy};
+use rot_core::{AgentConfig, TaskExecutionPolicy, error::AgentError};
 use std::time::Duration;
 
 #[test]
@@ -48,42 +48,35 @@ fn test_task_policy_custom() {
 }
 
 #[test]
-fn test_agent_process_error_timeout_suggestions() {
-    let err = AgentProcessError::Timeout(Duration::from_secs(30));
+fn test_agent_error_timeout_suggestions() {
+    let err = AgentError::Timeout(Duration::from_secs(30));
     let suggestions = err.suggestions();
     assert!(!suggestions.is_empty());
-    assert!(suggestions.iter().any(|s| s.contains("--auto-approve")));
+    assert!(suggestions.iter().any(|s: &String| s.contains("--auto-approve")));
 }
 
 #[test]
-fn test_agent_process_error_approval_suggestions() {
-    let err = AgentProcessError::ApprovalRequired("bash".to_string());
+fn test_agent_error_approval_suggestions() {
+    let err = AgentError::ApprovalRequired("bash".to_string());
     let suggestions = err.suggestions();
     assert!(!suggestions.is_empty());
-    assert!(suggestions.iter().any(|s| s.contains("bash")));
+    assert!(suggestions.iter().any(|s: &String| s.contains("bash")));
 }
 
 #[test]
-fn test_agent_process_error_max_iterations_suggestions() {
-    let err = AgentProcessError::MaxIterations(50);
+fn test_agent_error_max_iterations_suggestions() {
+    let err = AgentError::MaxIterationsReached(50);
     let suggestions = err.suggestions();
     assert!(!suggestions.is_empty());
-    assert!(suggestions.iter().any(|s| s.contains("smaller")));
+    assert!(suggestions.iter().any(|s: &String| s.contains("smaller")));
 }
 
 #[test]
-fn test_agent_process_error_detailed_string() {
-    let err = AgentProcessError::ApprovalRequired("write".to_string());
+fn test_agent_error_detailed_string() {
+    let err = AgentError::ApprovalRequired("write".to_string());
     let detailed = err.to_detailed_string();
     assert!(detailed.contains("write"));
     assert!(detailed.contains("Suggestions:"));
-}
-
-#[test]
-fn test_agent_process_error_tool_execution_suggestions() {
-    let err = AgentProcessError::ToolExecution("test error".to_string());
-    let suggestions = err.suggestions();
-    assert!(!suggestions.is_empty());
 }
 
 #[test]
@@ -103,24 +96,24 @@ fn test_task_policy_clone() {
 }
 
 #[test]
-fn test_agent_process_error_timeout_display() {
-    let err = AgentProcessError::Timeout(Duration::from_secs(30));
+fn test_agent_error_timeout_display() {
+    let err = AgentError::Timeout(Duration::from_secs(30));
     let msg = err.to_string();
     assert!(msg.contains("30"));
     assert!(msg.contains("timed out"));
 }
 
 #[test]
-fn test_agent_process_error_max_iterations_display() {
-    let err = AgentProcessError::MaxIterations(50);
+fn test_agent_error_max_iterations_display() {
+    let err = AgentError::MaxIterationsReached(50);
     let msg = err.to_string();
     assert!(msg.contains("50"));
     assert!(msg.contains("iterations"));
 }
 
 #[test]
-fn test_agent_process_error_approval_display() {
-    let err = AgentProcessError::ApprovalRequired("read".to_string());
+fn test_agent_error_approval_display() {
+    let err = AgentError::ApprovalRequired("read".to_string());
     let msg = err.to_string();
     assert!(msg.contains("read"));
     assert!(msg.contains("approval"));

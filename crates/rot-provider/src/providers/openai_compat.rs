@@ -396,7 +396,6 @@ impl Provider for OpenAiCompatProvider {
 // — OpenAI response types for deserialization —
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiChunk {
     #[serde(default)]
     choices: Vec<OpenAiChunkChoice>,
@@ -405,7 +404,6 @@ struct OpenAiChunk {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiChunkChoice {
     delta: OpenAiDelta,
     #[serde(default)]
@@ -413,7 +411,6 @@ struct OpenAiChunkChoice {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiDelta {
     #[serde(default)]
     content: Option<String>,
@@ -422,7 +419,6 @@ struct OpenAiDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiToolCallDelta {
     #[serde(default)]
     id: Option<String>,
@@ -431,7 +427,6 @@ struct OpenAiToolCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiFunctionDelta {
     #[serde(default)]
     name: Option<String>,
@@ -440,14 +435,12 @@ struct OpenAiFunctionDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiResponse {
     choices: Vec<OpenAiResponseChoice>,
     usage: OpenAiUsage,
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiResponseChoice {
     message: OpenAiMessage,
     #[serde(default)]
@@ -455,14 +448,12 @@ struct OpenAiResponseChoice {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiMessage {
     #[serde(default)]
     content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OpenAiUsage {
     #[serde(default)]
     prompt_tokens: usize,

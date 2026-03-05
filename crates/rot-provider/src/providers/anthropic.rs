@@ -161,9 +161,7 @@ impl AnthropicProvider {
     /// Parse an Anthropic SSE event into StreamEvent(s).
     fn parse_sse_event(&self, event: &AnthropicEvent) -> Vec<StreamEvent> {
         match event {
-            AnthropicEvent::ContentBlockDelta {
-                delta, index: _, ..
-            } => match delta {
+            AnthropicEvent::ContentBlockDelta { delta } => match delta {
                 Delta::Text { text } => {
                     vec![StreamEvent::TextDelta {
                         delta: text.clone(),
@@ -183,20 +181,17 @@ impl AnthropicProvider {
                     }]
                 }
             },
-            AnthropicEvent::ContentBlockStart {
-                index: _,
-                content_block,
-            } => match content_block {
+            AnthropicEvent::ContentBlockStart { content_block } => match content_block {
                 ContentBlockInfo::ToolUse { id, name, .. } => {
                     vec![StreamEvent::ToolCallStart {
                         id: id.clone(),
                         name: name.clone(),
                     }]
                 }
-                ContentBlockInfo::Text { .. } => vec![],
-                ContentBlockInfo::Thinking { .. } => vec![],
+                ContentBlockInfo::Text => vec![],
+                ContentBlockInfo::Thinking => vec![],
             },
-            AnthropicEvent::ContentBlockStop { index: _ } => {
+            AnthropicEvent::ContentBlockStop => {
                 // Could be end of text or end of tool call
                 // The caller should track state to determine which
                 vec![]
@@ -404,22 +399,20 @@ impl Provider for AnthropicProvider {
 /// Top-level SSE event from the Anthropic API.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-#[allow(dead_code)]
 enum AnthropicEvent {
     #[serde(rename = "message_start")]
     MessageStart { message: MessageStartData },
 
     #[serde(rename = "content_block_start")]
     ContentBlockStart {
-        index: usize,
         content_block: ContentBlockInfo,
     },
 
     #[serde(rename = "content_block_delta")]
-    ContentBlockDelta { index: usize, delta: Delta },
+    ContentBlockDelta { delta: Delta },
 
     #[serde(rename = "content_block_stop")]
-    ContentBlockStop { index: usize },
+    ContentBlockStop,
 
     #[serde(rename = "message_delta")]
     MessageDelta {
@@ -446,22 +439,15 @@ struct MessageStartData {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-#[allow(dead_code)]
 enum ContentBlockInfo {
     #[serde(rename = "text")]
-    Text {
-        #[serde(default)]
-        text: String,
-    },
+    Text,
 
     #[serde(rename = "tool_use")]
     ToolUse { id: String, name: String },
 
     #[serde(rename = "thinking")]
-    Thinking {
-        #[serde(default)]
-        thinking: String,
-    },
+    Thinking,
 }
 
 #[derive(Debug, Deserialize)]
@@ -590,7 +576,6 @@ mod tests {
     fn test_parse_text_delta() {
         let provider = AnthropicProvider::new("test-key");
         let event = AnthropicEvent::ContentBlockDelta {
-            index: 0,
             delta: Delta::Text {
                 text: "Hello".to_string(),
             },
@@ -608,7 +593,6 @@ mod tests {
     fn test_parse_tool_call_start() {
         let provider = AnthropicProvider::new("test-key");
         let event = AnthropicEvent::ContentBlockStart {
-            index: 0,
             content_block: ContentBlockInfo::ToolUse {
                 id: "tc_1".to_string(),
                 name: "read".to_string(),

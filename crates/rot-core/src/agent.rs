@@ -13,7 +13,7 @@ use futures::future::join_all;
 use futures::StreamExt;
 use rot_session::{SessionEntry, SessionStore};
 use rot_provider::{
-    Provider, ProviderContent, ProviderError, ProviderMessage, Request, StopReason, StreamEvent,
+    Provider, ProviderContent, ProviderMessage, Request, StopReason, StreamEvent,
     ToolDefinition,
 };
 use rot_tools::{
@@ -155,7 +155,7 @@ impl Agent {
         self: &Arc<Self>,
         messages: &mut Vec<Message>,
         user_input: &str,
-    ) -> Result<Message, AgentProcessError> {
+    ) -> Result<Message, crate::error::AgentError> {
         let invocation = AgentInvocation {
             session_id: self.session_id.clone().unwrap_or_default(),
             system_prompt: self.config.system_prompt.clone(),
@@ -170,7 +170,7 @@ impl Agent {
         messages: &mut Vec<Message>,
         user_input: &str,
         invocation: AgentInvocation,
-    ) -> Result<Message, AgentProcessError> {
+    ) -> Result<Message, crate::error::AgentError> {
         // Add user message
         let user_msg = Message::user(user_input);
         persist_message_to_session(&invocation.session_id, &user_msg).await;
@@ -218,7 +218,7 @@ impl Agent {
                 .provider
                 .stream(request)
                 .await
-                .map_err(AgentProcessError::Provider)?;
+                .map_err(crate::error::AgentError::Provider)?;
 
             let mut text_content = String::new();
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
@@ -226,7 +226,7 @@ impl Agent {
             let mut _stop_reason = StopReason::EndTurn;
 
             while let Some(event) = stream.next().await {
-                let event = event.map_err(AgentProcessError::Provider)?;
+                let event = event.map_err(crate::error::AgentError::Provider)?;
 
                 // Notify callback
                 if let Some(ref cb) = self.on_event {
@@ -381,7 +381,7 @@ impl Agent {
         }
         tracing::debug!("Agent loop finished due to max iterations");
 
-        Err(AgentProcessError::MaxIterations(
+        Err(crate::error::AgentError::MaxIterationsReached(
             self.config.max_iterations,
         ))
     }
@@ -771,69 +771,12 @@ struct PendingToolCall {
     arguments: String,
 }
 
-/// Errors that can occur during agent processing.
-#[derive(Debug, thiserror::Error)]
-pub enum AgentProcessError {
-    #[error("Provider error: {0}")]
-    Provider(#[from] ProviderError),
 
-    #[error("Max iterations ({0}) reached")]
-    MaxIterations(usize),
-
-    #[error("Tool execution failed: {0}")]
-    ToolExecution(String),
-
-    #[error("Tool '{0}' requires approval but running in non-interactive mode")]
-    ApprovalRequired(String),
-
-    #[error("Operation timed out after {0:?}")]
-    Timeout(std::time::Duration),
-}
-
-impl AgentProcessError {
-    pub fn suggestions(&self) -> Vec<String> {
-        match self {
-            AgentProcessError::Timeout(_) => vec![
-                "Simplify your request to reduce processing time".to_string(),
-                "Use --auto-approve for non-interactive mode".to_string(),
-                "Run in interactive mode (without 'exec' subcommand) for complex tasks".to_string(),
-            ],
-            AgentProcessError::ApprovalRequired(tool) => vec![
-                "Use --auto-approve to allow all tool calls".to_string(),
-                format!("Use --approve-list {} to allow this specific tool", tool),
-                "Run in interactive mode (without 'exec' subcommand)".to_string(),
-            ],
-            AgentProcessError::MaxIterations(_) => vec![
-                "Break down your request into smaller tasks".to_string(),
-                "Use a more specific prompt to reduce iterations".to_string(),
-            ],
-            AgentProcessError::ToolExecution(_) => vec![
-                "Check the tool parameters for errors".to_string(),
-                "Run with --verbose for detailed logs".to_string(),
-            ],
-            AgentProcessError::Provider(_) => vec![
-                "Check your API key and provider configuration".to_string(),
-                "Verify network connectivity".to_string(),
-            ],
-        }
-    }
-
-    pub fn to_detailed_string(&self) -> String {
-        let mut msg = self.to_string();
-        let suggestions = self.suggestions();
-        if !suggestions.is_empty() {
-            msg.push_str("\n\nSuggestions:\n");
-            for (i, suggestion) in suggestions.iter().enumerate() {
-                msg.push_str(&format!("  {}. {}\n", i + 1, suggestion));
-            }
-        }
-        msg
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rot_provider::ProviderError;
     use futures::stream::{self, BoxStream, StreamExt};
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::Mutex as StdMutex;

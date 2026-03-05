@@ -23,7 +23,7 @@ repository = "https://github.com/your-org/rot"
 
 [workspace.dependencies]
 # Async
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util", "io-std", "signal", "net"] }
 async-trait = "0.1"
 futures = "0.3"
 

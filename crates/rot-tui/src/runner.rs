@@ -548,9 +548,9 @@ pub async fn run_tui(
                                     }
                                 }
 
-                                // Super+Enter (Cmd+Enter on macOS) submits text. Plain Enter = newline if no slash menu.
-                                let is_submit = key.modifiers.contains(KeyModifiers::SUPER) || key.modifiers.contains(KeyModifiers::META);
-                                if !is_submit {
+                                // Plain Enter submits text. Shift+Enter or Alt/Option+Enter inserts a newline.
+                                let is_newline = key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT);
+                                if is_newline {
                                     app.insert_newline();
                                     continue;
                                 }

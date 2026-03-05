@@ -901,16 +901,14 @@ impl App {
         frame.render_widget(outer_block, area);
 
         // Calculate input box height dynamically with proper line wrap accounting
-        let input_char_count = self.input.chars().count() as u16;
-        let input_newlines = self.input.matches('\n').count() as u16;
-        // Estimate wrapped lines based on available width (rough estimate: ~60 chars per line)
-        let estimated_wrap_lines = if area.width > 10 {
-            input_char_count / area.width.saturating_sub(10)
-        } else {
-            0
-        };
-        let input_lines = input_newlines + estimated_wrap_lines + 1;
-        let input_height = (input_lines + 2).clamp(3, (area.height / 3).max(3));
+        let usable_width = inner.width.saturating_sub(4).max(1); // Borders + padding
+        let mut input_lines = 0;
+        for (i, line) in self.input.split('\n').enumerate() {
+            let prefix_len = if i == 0 { 2 } else { 2 }; // "› " or "  "
+            let line_len = line.chars().count() as u16 + prefix_len;
+            input_lines += line_len.div_ceil(usable_width).max(1);
+        }
+        let input_height = (input_lines + 2).clamp(3, (inner.height / 2).max(3));
 
         // Layout: header(1) | messages(flex) | input(dynamic) | footer(1)
         let chunks = Layout::default()
@@ -1301,12 +1299,17 @@ impl App {
             cursor_y += visual_lines + 1; // +1 for the line itself
         }
 
-        let visible_height = area.height.saturating_sub(2); // Top border + 1 bottom margin/border if any
+        let visible_height = area.height.saturating_sub(1); // Top border only
         let scroll_y = if cursor_y >= visible_height {
             cursor_y.saturating_sub(visible_height) + 1
         } else {
             0
         };
+
+        // Clear area before rendering to prevent bleeding
+        frame.render_widget(Clear, area);
+        // Fill background
+        frame.render_widget(Block::default().bg(COLOR_BAR_BG), area);
 
         let input_widget = Paragraph::new(lines)
             .block(block)

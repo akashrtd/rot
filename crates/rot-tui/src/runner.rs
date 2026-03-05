@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use std::io::stdout;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Messages sent from the background processing task back to the TUI.
 enum AgentEvent {
@@ -71,17 +71,17 @@ pub async fn run_tui(
     let config_store = rot_core::config::ConfigStore::new();
     let mcp_count = config_store.load().mcp_servers.iter().filter(|s| s.enabled).count();
 
-    let mut app = App::new(model, provider_name, agent_name, mcp_count);
-
-    // Show welcome banner
-    app.show_welcome();
-
-    // Create session
+    // Create session (needed for App::new)
     let cwd = std::env::current_dir()?;
-    let session = session_store
+    let mut session = session_store
         .create(&cwd, model, provider_name)
         .await
         .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    let mut app = App::new(model, provider_name, agent_name, mcp_count, &session.id, None);
+
+    // Show welcome banner
+    app.show_welcome();
 
     // Build agent (shared for background tasks)
     let config = agent_config(agent_name, Some(system_prompt));
@@ -126,6 +126,12 @@ pub async fn run_tui(
         if needs_redraw {
             terminal.draw(|frame| app.render(frame))?;
             needs_redraw = false;
+        }
+
+        if app.state == AppState::Sessions && app.sessions_ui_state.sessions.is_empty() {
+            if let Ok(sessions) = session_store.list_all(&cwd).await {
+                app.sessions_ui_state.sessions = sessions;
+            }
         }
 
         // Check for agent completion (non-blocking)
@@ -322,6 +328,158 @@ pub async fn run_tui(
                     continue;
                 }
 
+                if app.state == AppState::Sessions {
+                    match key.code {
+                        KeyCode::Esc => {
+                            if app.sessions_ui_state.is_renaming {
+                                app.sessions_ui_state.is_renaming = false;
+                            } else {
+                                app.state = AppState::Idle;
+                            }
+                        }
+                        KeyCode::Up => {
+                            if !app.sessions_ui_state.is_renaming {
+                                app.sessions_ui_state.selected_index = app.sessions_ui_state.selected_index.saturating_sub(1);
+                            }
+                        }
+                        KeyCode::Down => {
+                            if !app.sessions_ui_state.is_renaming {
+                                app.sessions_ui_state.selected_index += 1;
+                            }
+                        }
+                        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if !app.sessions_ui_state.is_renaming {
+                                let filtered: Vec<_> = app.sessions_ui_state.sessions.iter()
+                                    .filter(|s| {
+                                        let q = app.sessions_ui_state.query.to_lowercase();
+                                        s.title.as_ref().map(|t| t.to_lowercase().contains(&q)).unwrap_or(false) ||
+                                        s.id.to_lowercase().contains(&q)
+                                    })
+                                    .collect();
+                                
+                                if let Some(meta) = filtered.get(app.sessions_ui_state.selected_index) {
+                                    let id_to_delete = meta.id.clone();
+                                    if let Ok(_) = session_store.delete(&cwd, &id_to_delete).await {
+                                        if let Ok(sessions) = session_store.list_all(&cwd).await {
+                                            app.sessions_ui_state.sessions = sessions;
+                                            app.sessions_ui_state.selected_index = app.sessions_ui_state.selected_index.min(app.sessions_ui_state.sessions.len().saturating_sub(1));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if !app.sessions_ui_state.is_renaming {
+                                let filtered: Vec<_> = app.sessions_ui_state.sessions.iter()
+                                    .filter(|s| {
+                                        let q = app.sessions_ui_state.query.to_lowercase();
+                                        s.title.as_ref().map(|t| t.to_lowercase().contains(&q)).unwrap_or(false) ||
+                                        s.id.to_lowercase().contains(&q)
+                                    })
+                                    .collect();
+
+                                if let Some(meta) = filtered.get(app.sessions_ui_state.selected_index) {
+                                    app.sessions_ui_state.is_renaming = true;
+                                    app.sessions_ui_state.rename_input = meta.title.clone().unwrap_or_else(|| meta.id.clone());
+                                }
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if app.sessions_ui_state.is_renaming {
+                                let filtered: Vec<_> = app.sessions_ui_state.sessions.iter()
+                                    .filter(|s| {
+                                        let q = app.sessions_ui_state.query.to_lowercase();
+                                        s.title.as_ref().map(|t| t.to_lowercase().contains(&q)).unwrap_or(false) ||
+                                        s.id.to_lowercase().contains(&q)
+                                    })
+                                    .collect();
+
+                                if let Some(meta) = filtered.get(app.sessions_ui_state.selected_index) {
+                                    let id = meta.id.clone();
+                                    let new_title = app.sessions_ui_state.rename_input.clone();
+                                    if let Ok(_) = session_store.rename(&cwd, &id, &new_title).await {
+                                        app.sessions_ui_state.is_renaming = false;
+                                        if let Ok(sessions) = session_store.list_all(&cwd).await {
+                                            app.sessions_ui_state.sessions = sessions;
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Load session
+                                let filtered: Vec<_> = app.sessions_ui_state.sessions.iter()
+                                    .filter(|s| {
+                                        let q = app.sessions_ui_state.query.to_lowercase();
+                                        s.title.as_ref().map(|t| t.to_lowercase().contains(&q)).unwrap_or(false) ||
+                                        s.id.to_lowercase().contains(&q)
+                                    })
+                                    .collect();
+
+                                if let Some(meta) = filtered.get(app.sessions_ui_state.selected_index) {
+                                    let id = meta.id.clone();
+                                    if let Ok(new_session) = session_store.load(&cwd, &id).await {
+                                        session = new_session;
+                                        app.session_id = id.clone();
+                                        app.chat_lines.clear();
+                                        for entry in &session.entries {
+                                            if let rot_session::SessionEntry::Message { role, content, .. } = entry {
+                                                let style = match role.as_str() {
+                                                    "user" => ChatStyle::User,
+                                                    "assistant" => ChatStyle::Assistant,
+                                                    "tool" => ChatStyle::Tool,
+                                                    _ => ChatStyle::System,
+                                                };
+                                                // Simplified content display for now
+                                                let text = if let Some(arr) = content.as_array() {
+                                                    arr.iter().filter_map(|v| v.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join("")
+                                                } else {
+                                                    content.to_string()
+                                                };
+                                                app.push_chat(role, &text, style);
+                                            }
+                                        }
+                                        
+                                        // Rebuild agent with new session id
+                                        match create_provider(&app.provider, &app.model) {
+                                            Ok(new_provider) => {
+                                                let config = agent_config(&app.agent, None);
+                                                agent = build_agent(
+                                                    new_provider,
+                                                    tools.clone(),
+                                                    config,
+                                                    current_security.clone(),
+                                                    session.id.clone(),
+                                                    approval_tx.clone(),
+                                                );
+                                                app.push_chat("system", &format!("Switched to session {}", id), ChatStyle::System);
+                                            }
+                                            Err(_) => {}
+                                        }
+                                        app.state = AppState::Idle;
+                                    }
+                                }
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if app.sessions_ui_state.is_renaming {
+                                app.sessions_ui_state.rename_input.push(c);
+                            } else {
+                                app.sessions_ui_state.query.push(c);
+                                app.sessions_ui_state.selected_index = 0;
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if app.sessions_ui_state.is_renaming {
+                                app.sessions_ui_state.rename_input.pop();
+                            } else {
+                                app.sessions_ui_state.query.pop();
+                                app.sessions_ui_state.selected_index = 0;
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 if app.state == AppState::Config {
                     app.handle_config_key(key.code, &config_store);
 
@@ -363,12 +521,7 @@ pub async fn run_tui(
                     match app.input_mode {
                         InputMode::Insert => match key.code {
                             KeyCode::Enter => {
-                                // Shift+Enter = newline, plain Enter = send
-                                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.insert_newline();
-                                    continue;
-                                }
-
+                                // If slash menu is active, plain Enter selects the command
                                 if app.is_slash_menu_active() {
                                     if let Some(selected) = app.selected_slash_command() {
                                         if handle_session_inspection_command(
@@ -393,6 +546,13 @@ pub async fn run_tui(
                                             continue;
                                         }
                                     }
+                                }
+
+                                // Super+Enter (Cmd+Enter on macOS) submits text. Plain Enter = newline if no slash menu.
+                                let is_submit = key.modifiers.contains(KeyModifiers::SUPER) || key.modifiers.contains(KeyModifiers::META);
+                                if !is_submit {
+                                    app.insert_newline();
+                                    continue;
                                 }
 
                                 let input = app.submit_input();
@@ -475,102 +635,121 @@ pub async fn run_tui(
                                 let allow_unsafe = allow_unsafe_rlm;
                                 let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
+                                let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+                                app.cancel_tx = Some(cancel_tx);
+
                                 tokio::spawn(async move {
                                     let execution_agent = agent_for_run;
-                                    if is_rlm {
-                                        if rlm_security.requires_explicit_rlm_opt_in() && !allow_unsafe {
-                                            let _ = tx_clone.send(AgentEvent::Error(
-                                                "RLM is blocked in danger-full-access mode unless --allow-unsafe-rlm is set."
-                                                    .to_string(),
-                                            ));
-                                            return;
-                                        }
+                                    
+                                    let run_future = async {
+                                        if is_rlm {
+                                            if rlm_security.requires_explicit_rlm_opt_in() && !allow_unsafe {
+                                                let _ = tx_clone.send(AgentEvent::Error(
+                                                    "RLM is blocked in danger-full-access mode unless --allow-unsafe-rlm is set."
+                                                        .to_string(),
+                                                ));
+                                                return;
+                                            }
 
-                                        let rlm_config = rot_rlm::RlmConfig {
-                                            on_progress: Some(Arc::new(move |msg: String| {
-                                                let _ = progress_tx.send(AgentEvent::Progress(msg));
-                                            })),
-                                            runtime_security: rlm_security,
-                                            ..Default::default()
-                                        };
-                                        
-                                        let mut engine = rot_rlm::RlmEngine::new(rlm_config, execution_agent);
-                                        let result = engine.process(&input_owned, cwd.to_str().unwrap_or(".")).await;
-                                        
-                                        match result {
-                                            Ok(ans) => {
-                                                let _ = tx_clone.send(AgentEvent::Response {
-                                                    text: ans,
-                                                    tool_names: routed_agent_name
-                                                        .map(|name| vec![format!("@{}", name), "RLM Loop".to_string()])
-                                                        .unwrap_or_else(|| vec!["RLM Loop".to_string()]),
+                                            let rlm_config = rot_rlm::RlmConfig {
+                                                on_progress: Some(Arc::new(move |msg: String| {
+                                                    let _ = progress_tx.send(AgentEvent::Progress(msg));
+                                                })),
+                                                runtime_security: rlm_security,
+                                                ..Default::default()
+                                            };
+                                            
+                                            let mut engine = rot_rlm::RlmEngine::new(rlm_config, execution_agent);
+                                            let result = engine.process(&input_owned, cwd.to_str().unwrap_or(".")).await;
+                                            
+                                            match result {
+                                                Ok(ans) => {
+                                                    let _ = tx_clone.send(AgentEvent::Response {
+                                                        text: ans,
+                                                        tool_names: routed_agent_name
+                                                            .map(|name| vec![format!("@{}", name), "RLM Loop".to_string()])
+                                                            .unwrap_or_else(|| vec!["RLM Loop".to_string()]),
+                                                        input_tokens: 0,
+                                                        output_tokens: 0, // Need accurate count later
+                                                    });
+                                                }
+                                                Err(e) => {
+                                                    let _ = tx_clone.send(AgentEvent::Error(format!("RLM Error: {}", e)));
+                                                }
+                                            }
+                                        } else {
+                                            let mut msgs = messages_clone.lock().unwrap().clone();
+                                            let result =
+                                                execution_agent.process(&mut msgs, &input_owned).await;
+
+                                            // Update shared messages
+                                            *messages_clone.lock().unwrap() = msgs;
+
+                                            let event = match result {
+                                            Ok(response) => {
+                                                let text = response
+                                                    .content
+                                                    .iter()
+                                                    .filter_map(|c| {
+                                                        if let ContentBlock::Text { text } = c {
+                                                            Some(text.as_str())
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                                    .join("\n");
+
+                                                let mut tool_names: Vec<String> = response
+                                                    .content
+                                                    .iter()
+                                                    .filter_map(|c| {
+                                                        if let ContentBlock::ToolCall {
+                                                            name, ..
+                                                        } = c
+                                                        {
+                                                            Some(name.clone())
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .collect();
+                                                if let Some(name) = routed_agent_name {
+                                                    tool_names.insert(0, format!("@{}", name));
+                                                }
+
+                                                // Estimate tokens from text (~4 chars/token)
+                                                let est_output = text.len() / 4;
+
+                                                AgentEvent::Response {
+                                                    text,
+                                                    tool_names,
                                                     input_tokens: 0,
-                                                    output_tokens: 0, // Need accurate count later
-                                                });
+                                                    output_tokens: est_output,
+                                                }
                                             }
-                                            Err(e) => {
-                                                let _ = tx_clone.send(AgentEvent::Error(format!("RLM Error: {}", e)));
-                                            }
-                                        }
-                                    } else {
-                                        let mut msgs = messages_clone.lock().unwrap().clone();
-                                        let result =
-                                            execution_agent.process(&mut msgs, &input_owned).await;
+                                            Err(e) => AgentEvent::Error(e.to_string()),
+                                        };
 
-                                        // Update shared messages
-                                        *messages_clone.lock().unwrap() = msgs;
-
-                                        let event = match result {
-                                        Ok(response) => {
-                                            let text = response
-                                                .content
-                                                .iter()
-                                                .filter_map(|c| {
-                                                    if let ContentBlock::Text { text } = c {
-                                                        Some(text.as_str())
-                                                    } else {
-                                                        None
-                                                    }
-                                                })
-                                                .collect::<Vec<_>>()
-                                                .join("\n");
-
-                                            let mut tool_names: Vec<String> = response
-                                                .content
-                                                .iter()
-                                                .filter_map(|c| {
-                                                    if let ContentBlock::ToolCall {
-                                                        name, ..
-                                                    } = c
-                                                    {
-                                                        Some(name.clone())
-                                                    } else {
-                                                        None
-                                                    }
-                                                })
-                                                .collect();
-                                            if let Some(name) = routed_agent_name {
-                                                tool_names.insert(0, format!("@{}", name));
-                                            }
-
-                                            // Estimate tokens from text (~4 chars/token)
-                                            let est_output = text.len() / 4;
-
-                                            AgentEvent::Response {
-                                                text,
-                                                tool_names,
-                                                input_tokens: 0,
-                                                output_tokens: est_output,
-                                            }
-                                        }
-                                        Err(e) => AgentEvent::Error(e.to_string()),
+                                        let _ = tx_clone.send(event);
+                                        } // End if !is_rlm
                                     };
 
-                                    let _ = tx_clone.send(event);
-                                    } // End if !is_rlm
+                                    tokio::select! {
+                                        _ = &mut cancel_rx => {
+                                            let _ = tx_clone.send(AgentEvent::Error("Generation cancelled by user.".to_string()));
+                                        }
+                                        _ = run_future => {}
+                                    }
                                 });
                             }
-                            KeyCode::Backspace => app.backspace(),
+                            KeyCode::Backspace => {
+                                if key.modifiers.contains(KeyModifiers::SUPER) || key.modifiers.contains(KeyModifiers::META) {
+                                    app.handle_slash_command("/clear");
+                                } else {
+                                    app.backspace();
+                                }
+                            }
                             KeyCode::Delete => app.delete_char(),
                             KeyCode::Left => app.cursor_left(),
                             KeyCode::Right => app.cursor_right(),
@@ -579,15 +758,58 @@ pub async fn run_tui(
                             KeyCode::Up => {
                                 if app.is_slash_menu_active() {
                                     app.move_slash_selection_up();
+                                } else {
+                                    app.input_history_up();
                                 }
                             }
                             KeyCode::Down => {
                                 if app.is_slash_menu_active() {
                                     app.move_slash_selection_down();
+                                } else {
+                                    app.input_history_down();
                                 }
                             }
-                            KeyCode::Char(c) => app.insert_char(c),
-                            KeyCode::Esc => app.input_mode = InputMode::Normal,
+                            KeyCode::Char(c) => {
+                                let has_meta = key.modifiers.contains(KeyModifiers::SUPER) || key.modifiers.contains(KeyModifiers::META);
+                                let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                                let has_shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
+                                if (c == 'p' || c == 'P') && (has_meta || has_ctrl) {
+                                    app.input.clear();
+                                    app.cursor_pos = 0;
+                                    app.handle_slash_command("/models");
+                                } else if (c == 'c' || c == 'C') && has_meta && has_shift {
+                                    if let Some(clip) = &app.clipboard {
+                                        if let Some(last_msg) = app.chat_lines.iter().rev().find(|msg| msg.role == "assistant") {
+                                            if let Ok(mut clipboard) = clip.lock() {
+                                                let _ = clipboard.set_text(last_msg.content.clone());
+                                                app.status = "Copied response!".to_string();
+                                                app.copy_feedback_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+                                            }
+                                        }
+                                    }
+                                } else if has_meta || has_ctrl || key.modifiers.contains(KeyModifiers::ALT) {
+                                    // Ignore passing arbitrary modified chars to insert buffer natively
+                                } else {
+                                    app.insert_char(c);
+                                }
+                            }
+                            KeyCode::Esc => {
+                                if let Some(last) = app.last_esc {
+                                    if last.elapsed() < Duration::from_millis(500) {
+                                        if let Some(tx) = app.cancel_tx.take() {
+                                            let _ = tx.send(());
+                                            app.status = "Cancelled.".to_string();
+                                        }
+                                        app.last_esc = None;
+                                    } else {
+                                        app.last_esc = Some(Instant::now());
+                                    }
+                                } else {
+                                    app.last_esc = Some(Instant::now());
+                                }
+                                app.input_mode = InputMode::Normal;
+                            }
                             _ => {}
                         },
                         InputMode::Normal => match key.code {
@@ -621,6 +843,21 @@ pub async fn run_tui(
                             KeyCode::Char('y') => {
                                 if let Some(msg) = app.chat_lines.last() {
                                     app.copy_to_clipboard(msg.content.clone());
+                                }
+                            }
+                            KeyCode::Esc => {
+                                if let Some(last) = app.last_esc {
+                                    if last.elapsed() < Duration::from_millis(500) {
+                                        if let Some(tx) = app.cancel_tx.take() {
+                                            let _ = tx.send(());
+                                            app.status = "Cancelled.".to_string();
+                                        }
+                                        app.last_esc = None;
+                                    } else {
+                                        app.last_esc = Some(Instant::now());
+                                    }
+                                } else {
+                                    app.last_esc = Some(Instant::now());
                                 }
                             }
                             _ => {}
@@ -1026,33 +1263,33 @@ fn create_provider(provider_name: &str, model: &str) -> std::result::Result<Box<
         "anthropic" => {
             let api_key = std::env::var("ANTHROPIC_API_KEY")
                 .map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
-            let mut provider = rot_provider::AnthropicProvider::new(api_key);
+            let mut provider = rot_provider::AnthropicProvider::new(api_key, vec![]);
             provider.set_model(model).map_err(|e| e.to_string())?;
             Ok(Box::new(provider))
         }
         "zai" => {
             let api_key = std::env::var("ZAI_API_KEY")
                 .map_err(|_| "ZAI_API_KEY not set".to_string())?;
-            let mut provider = rot_provider::new_zai_provider(api_key);
+            let mut provider = rot_provider::new_zai_provider(api_key, vec![]);
             provider.set_model(model).map_err(|e| e.to_string())?;
             Ok(Box::new(provider))
         }
         "openai" => {
             let api_key = std::env::var("OPENAI_API_KEY")
                 .map_err(|_| "OPENAI_API_KEY not set".to_string())?;
-            let mut provider = rot_provider::new_openai_provider(api_key);
+            let mut provider = rot_provider::new_openai_provider(api_key, vec![]);
             provider.set_model(model).map_err(|e| e.to_string())?;
             Ok(Box::new(provider))
         }
         "ollama" => {
-            let mut provider = rot_provider::new_ollama_provider(String::new());
+            let mut provider = rot_provider::new_ollama_provider(String::new(), vec![]);
             provider.set_model(model).map_err(|e| e.to_string())?;
             Ok(Box::new(provider))
         }
         "openrouter" => {
             let api_key = std::env::var("OPENROUTER_API_KEY")
                 .map_err(|_| "OPENROUTER_API_KEY not set".to_string())?;
-            let mut provider = rot_provider::new_openrouter_provider(api_key);
+            let mut provider = rot_provider::new_openrouter_provider(api_key, vec![]);
             provider.set_model(model).map_err(|e| e.to_string())?;
             Ok(Box::new(provider))
         }
@@ -1060,7 +1297,7 @@ fn create_provider(provider_name: &str, model: &str) -> std::result::Result<Box<
             let api_key = std::env::var("GOOGLE_API_KEY")
                 .or_else(|_| std::env::var("GEMINI_API_KEY"))
                 .map_err(|_| "GOOGLE_API_KEY (or GEMINI_API_KEY) not set".to_string())?;
-            let mut provider = rot_provider::new_google_provider(api_key);
+            let mut provider = rot_provider::new_google_provider(api_key, vec![]);
             provider.set_model(model).map_err(|e| e.to_string())?;
             Ok(Box::new(provider))
         }
@@ -1182,6 +1419,7 @@ mod tests {
                     parent_session_id: Some("parent-1".to_string()),
                     parent_tool_call_id: None,
                     agent: Some("review".to_string()),
+                    title: None,
                 },
                 SessionEntry::Message {
                     id: "msg-1".to_string(),

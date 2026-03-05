@@ -10,13 +10,8 @@ const ZAI_BASE_URL: &str = "https://api.z.ai/api/coding/paas/v4";
 /// Create a new z.ai provider.
 ///
 /// Uses the GLM Coding Plan endpoint. Set the `ZAI_API_KEY` environment variable.
-pub fn new_zai_provider(api_key: String) -> OpenAiCompatProvider {
-    let config = OpenAiCompatConfig {
-        base_url: ZAI_BASE_URL.to_string(),
-        api_key,
-        provider_name: "zai".to_string(),
-        default_model: "glm-5".to_string(),
-        models: vec![
+pub fn new_zai_provider(api_key: String, custom_models: Vec<ModelInfo>) -> OpenAiCompatProvider {
+    let mut models = vec![
             ModelInfo {
                 id: "glm-5".to_string(),
                 name: "GLM-5".to_string(),
@@ -33,7 +28,16 @@ pub fn new_zai_provider(api_key: String) -> OpenAiCompatProvider {
                 supports_thinking: false,
                 supports_tools: true,
             },
-        ],
+        ];
+    
+    models.extend(custom_models);
+
+    let config = OpenAiCompatConfig {
+        base_url: ZAI_BASE_URL.to_string(),
+        api_key,
+        provider_name: "zai".to_string(),
+        default_model: "glm-5".to_string(),
+        models,
     };
 
     OpenAiCompatProvider::new(config)
@@ -46,19 +50,19 @@ mod tests {
 
     #[test]
     fn test_zai_provider_name() {
-        let p = new_zai_provider("test-key".to_string());
+        let p = new_zai_provider("test-key".to_string(), vec![]);
         assert_eq!(p.name(), "zai");
     }
 
     #[test]
     fn test_zai_default_model() {
-        let p = new_zai_provider("test-key".to_string());
+        let p = new_zai_provider("test-key".to_string(), vec![]);
         assert_eq!(p.current_model(), "glm-5");
     }
 
     #[test]
     fn test_zai_models() {
-        let p = new_zai_provider("test-key".to_string());
+        let p = new_zai_provider("test-key".to_string(), vec![]);
         let models = p.models();
         assert_eq!(models.len(), 2);
         assert!(models.iter().any(|m| m.id == "glm-5"));
@@ -67,7 +71,7 @@ mod tests {
 
     #[test]
     fn test_zai_set_model() {
-        let mut p = new_zai_provider("test-key".to_string());
+        let mut p = new_zai_provider("test-key".to_string(), vec![]);
         assert!(p.set_model("glm-4.7").is_ok());
         assert_eq!(p.current_model(), "glm-4.7");
     }

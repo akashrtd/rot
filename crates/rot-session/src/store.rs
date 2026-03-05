@@ -122,6 +122,7 @@ impl SessionStore {
             parent_session_id: parent_session_id.map(str::to_string),
             parent_tool_call_id: parent_tool_call_id.map(str::to_string),
             agent: agent.map(str::to_string),
+            title: None,
         };
 
         // Write start entry
@@ -313,6 +314,46 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Delete a session.
+    pub async fn delete(&self, cwd: &Path, id: &str) -> Result<(), SessionError> {
+        let path = self.session_path(cwd, id);
+        if !path.exists() {
+            return Err(SessionError::NotFound(id.to_string()));
+        }
+        fs::remove_file(path).await?;
+        Ok(())
+    }
+
+    /// Rename a session (update title).
+    pub async fn rename(&self, cwd: &Path, id: &str, title: &str) -> Result<(), SessionError> {
+        let path = self.session_path(cwd, id);
+        if !path.exists() {
+            return Err(SessionError::NotFound(id.to_string()));
+        }
+
+        let content = fs::read_to_string(&path).await?;
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        if lines.is_empty() {
+            return Err(SessionError::InvalidFormat("Empty session file".to_string()));
+        }
+
+        let mut first: SessionEntry = serde_json::from_str(&lines[0])?;
+        match &mut first {
+            SessionEntry::SessionStart { title: ref mut t, .. } => {
+                *t = Some(title.to_string());
+            }
+            _ => {
+                return Err(SessionError::InvalidFormat(
+                    "First entry is not SessionStart".to_string(),
+                ));
+            }
+        }
+
+        lines[0] = serde_json::to_string(&first)?;
+        fs::write(&path, format!("{}\n", lines.join("\n"))).await?;
+        Ok(())
+    }
+
     /// Import a session JSONL file into this store.
     ///
     /// The imported session gets a new ID unless `id_override` is provided.
@@ -381,6 +422,7 @@ impl SessionStore {
                         parent_session_id,
                         parent_tool_call_id,
                         agent,
+                        title: None,
                     },
                     _ => {
                         return Err(SessionError::InvalidFormat(
@@ -428,12 +470,13 @@ impl SessionStore {
                 provider,
                 parent_session_id,
                 agent,
+                title,
                 ..
             } => Ok(SessionMeta {
                 id,
                 created_at: timestamp,
                 updated_at: entry_timestamp(&last),
-                title: None,
+                title,
                 cwd,
                 model,
                 provider,

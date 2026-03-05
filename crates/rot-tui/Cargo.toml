@@ -21,3 +21,4 @@ tracing = { workspace = true }
 rot-rlm = { version = "0.1.0", path = "../rot-rlm" }
 arboard = { workspace = true }
 textwrap = "0.16.2"
+chrono = { version = "0.4", features = ["serde"] }

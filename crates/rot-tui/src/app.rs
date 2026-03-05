@@ -7,7 +7,8 @@
 //! - Clean minimal layout: header | messages | context bar | input | footer
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap, List, ListItem};
+use chrono::{DateTime, Local};
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 
@@ -77,7 +78,29 @@ pub enum AppState {
     Approval, // Paused for user permission
     Agents,   // Agent selection overlay
     Config,   // Model & API Key overlay
+    Sessions, // Sessions list overlay
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionsUiState {
+    pub query: String,
+    pub selected_index: usize,
+    pub sessions: Vec<rot_session::SessionMeta>,
+    pub is_renaming: bool,
+    pub rename_input: String,
+}
+
+impl Default for SessionsUiState {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            selected_index: 0,
+            sessions: Vec::new(),
+            is_renaming: false,
+            rename_input: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,9 +139,9 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show help"),
     ("/clear", "Clear conversation"),
     ("/models", "Switch model"),
+    ("/access", "Set access mode (default/full)"),
     ("/rlm", "Toggle RLM"),
     ("/quit", "Exit app"),
-    ("/exit", "Exit app"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,6 +170,8 @@ pub enum AccessMode {
     pub model: String,
     pub provider: String,
     pub agent: String,
+    pub session_id: String,
+    pub session_title: Option<String>,
     pub thinking_tick: u16,
     pub total_input_tokens: usize,
     pub total_output_tokens: usize,
@@ -167,6 +192,7 @@ pub enum AccessMode {
     
     // Config state
     pub config_ui_state: ConfigUiState,
+    pub sessions_ui_state: SessionsUiState,
     pub config_changed: bool,
     pub agent_changed: bool,
     pub slash_menu_selected: usize,
@@ -180,6 +206,10 @@ pub enum AccessMode {
     pub copy_feedback_until: Option<Instant>,
     pub is_switching_model: bool,
     pub is_switching_agent: bool,
+    pub input_history: Vec<String>,
+    pub history_index: Option<usize>,
+    pub last_esc: Option<Instant>,
+    pub cancel_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 #[derive(Debug, Clone)]
@@ -203,7 +233,7 @@ pub enum ChatStyle {
 // ── App Implementation ─────────────────────────────────────────────────
 
 impl App {
-    pub fn new(model: &str, provider: &str, agent: &str, mcp_count: usize) -> Self {
+    pub fn new(model: &str, provider: &str, agent: &str, mcp_count: usize, session_id: &str, session_title: Option<String>) -> Self {
         Self {
             state: AppState::Idle,
             input_mode: InputMode::Insert,
@@ -218,6 +248,8 @@ impl App {
             model: model.to_string(),
             provider: provider.to_string(),
             agent: agent.to_string(),
+            session_id: session_id.to_string(),
+            session_title,
             thinking_tick: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
@@ -233,7 +265,8 @@ impl App {
             pending_approval_tx: None,
             rlm_enabled: false,
             rlm_iterating: false,
-            config_ui_state: ConfigUiState::List(0),
+            config_ui_state: ConfigUiState::default(),
+            sessions_ui_state: SessionsUiState::default(),
             config_changed: false,
             agent_changed: false,
             slash_menu_selected: 0,
@@ -245,6 +278,10 @@ impl App {
             copy_feedback_until: None,
             is_switching_model: false,
             is_switching_agent: false,
+            input_history: Vec::new(),
+            history_index: None,
+            last_esc: None,
+            cancel_tx: None,
         }
     }
 
@@ -270,50 +307,39 @@ impl App {
         let cwd = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| ".".to_string());
-        let short_cwd = cwd
-            .rsplit('/')
-            .take(2)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("/");
-
-        // Truncate fields if too long for the box
-        let max_field_len = 20;
-        let truncate_field = |s: &str| {
-            if s.len() > max_field_len {
-                format!("…{}", &s[s.len().saturating_sub(max_field_len - 1)..])
-            } else {
-                s.to_string()
-            }
-        };
-
-        let provider_str = truncate_field(&self.provider);
-        let model_str = truncate_field(&self.model);
-        let agent_str = truncate_field(&self.agent);
-        let cwd_str = if short_cwd.len() > max_field_len {
-            format!("…{}", &short_cwd[short_cwd.len().saturating_sub(max_field_len - 1)..])
+        
+        let short_cwd = if cwd.len() > 20 {
+            format!("…{}", &cwd[cwd.len().saturating_sub(19)..])
         } else {
-            short_cwd
+            cwd.clone()
         };
+        let display_session = self.session_title.as_deref().unwrap_or(&self.session_id);
 
         let welcome = format!(
             "{}\n\
-             ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n\
-             ┃ provider: {:<19}┃\n\
-             ┃ model   : {:<19}┃\n\
-             ┃ agent   : {:<19}┃\n\
-             ┃ cwd     : {:<19}┃\n\
-             ┃ rlm     : {:<19}┃\n\
-             ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\
              \n\
-             Type a message or use /help for commands.",
+             ── SYSTEM STATUS ──────────────────────────────────────────\n\
+             \n\
+             provider : {:<20} agent    : @{:<18}\n\
+             model    : {:<20} mcp      : {:<19}\n\
+             session  : {:<20} access   : {:<19}\n\
+             cwd      : {:<20} rlm      : {:<19}\n\
+             \n\
+             ── COMMANDS ───────────────────────────────────────────────\n\
+             \n\
+             /models  : switch provider/model     /clear   : clear chat\n\
+             /agents  : switch active agent       /rlm     : toggle RLM\n\
+             /access  : toggle full access        /quit    : exit app\n\
+             \n\
+             Type a message or use /help for more info.",
             ASCII_BANNER.trim_matches('\n'),
-            provider_str,
-            model_str,
-            agent_str,
-            cwd_str,
+            self.provider,
+            self.agent,
+            self.model,
+            self.mcp_count,
+            display_session.chars().take(20).collect::<String>(),
+            format!("{:?}", self.access_mode).to_lowercase(),
+            short_cwd,
             if self.rlm_enabled { "on" } else { "off" }
         );
         self.push_chat("", &welcome, ChatStyle::Welcome);
@@ -363,7 +389,9 @@ impl App {
                      /clear      — clear conversation\n\
                      /model      — show current model\n\
                      /model NAME — switch model\n\
+                     /access     — toggle access mode\n\
                      /rlm        — toggle RLM engine on/off\n\
+                     /session    — show all sessions\n\
                      /quit       — exit rot",
                     ChatStyle::System,
                 );
@@ -399,7 +427,51 @@ impl App {
                 );
                 true
             }
-            "/quit" | "/exit" => {
+            "/access" => {
+                let current_mode = self.access_mode;
+                
+                if parts.len() > 1 {
+                    let requested_mode = parts[1].trim().to_lowercase();
+                    match requested_mode.as_str() {
+                        "default" => self.access_mode = AccessMode::Default,
+                        "full" => self.access_mode = AccessMode::Full,
+                        _ => {
+                            self.push_chat(
+                                "system",
+                                &format!("Invalid access mode: '{}'. Use 'default' or 'full'.", requested_mode),
+                                ChatStyle::Error,
+                            );
+                            return true;
+                        }
+                    }
+                } else {
+                    // Toggle if no argument provided
+                    self.access_mode = if self.access_mode == AccessMode::Default {
+                        AccessMode::Full
+                    } else {
+                        AccessMode::Default
+                    };
+                }
+
+                if current_mode != self.access_mode {
+                    self.access_changed = true;
+                    let mode_str = match self.access_mode {
+                        AccessMode::Default => "Default",
+                        AccessMode::Full => "Full",
+                    };
+                    self.push_chat(
+                        "system",
+                        &format!("Access mode is now {}", mode_str),
+                        ChatStyle::System,
+                    );
+                }
+                true
+            }
+            "/session" => {
+                self.state = AppState::Sessions;
+                true
+            }
+            "/quit" => {
                 self.running = false;
                 true
             }
@@ -417,6 +489,13 @@ impl App {
 
     pub fn submit_input(&mut self) -> String {
         let text = self.input.clone();
+        if !text.trim().is_empty() {
+            // Only add if it's different from the very last to avoid spam
+            if self.input_history.last() != Some(&text) {
+                self.input_history.push(text.clone());
+            }
+        }
+        self.history_index = None;
         self.input.clear();
         self.cursor_pos = 0;
         self.slash_menu_selected = 0;
@@ -725,6 +804,52 @@ impl App {
         }
     }
 
+    pub fn input_history_up(&mut self) {
+        if self.input_history.is_empty() {
+            return;
+        }
+        let total = self.input_history.len();
+        match self.history_index {
+            None => {
+                // If we're at the bottom and hit up, load the last item
+                self.history_index = Some(total - 1);
+            }
+            Some(idx) => {
+                // Not at the top
+                if idx > 0 {
+                    self.history_index = Some(idx - 1);
+                }
+            }
+        }
+        
+        if let Some(idx) = self.history_index {
+            self.input = self.input_history[idx].clone();
+            self.cursor_pos = self.input.len();
+        }
+    }
+
+    pub fn input_history_down(&mut self) {
+        if self.input_history.is_empty() {
+            return;
+        }
+        let total = self.input_history.len();
+        match self.history_index {
+            None => return, // Already empty/at the bottom
+            Some(idx) => {
+                if idx + 1 >= total {
+                    // Reached the end, clear it
+                    self.history_index = None;
+                    self.input.clear();
+                    self.cursor_pos = 0;
+                } else {
+                    self.history_index = Some(idx + 1);
+                    self.input = self.input_history[idx + 1].clone();
+                    self.cursor_pos = self.input.len();
+                }
+            }
+        }
+    }
+
     pub fn tick(&mut self) {
         self.thinking_tick = self.thinking_tick.wrapping_add(1);
         
@@ -809,6 +934,8 @@ impl App {
             self.render_approval_dialog(frame, area);
         } else if self.state == AppState::Config {
             self.render_config_dialog(frame, area);
+        } else if self.state == AppState::Sessions {
+            self.render_sessions_overlay(frame, area);
         } else if self.state == AppState::Agents {
             self.render_agents_dialog(frame, area);
         }
@@ -827,6 +954,7 @@ impl App {
             AppState::Approval => "⚠",
             AppState::Agents => "◈",
             AppState::Config => "⚙",
+            AppState::Sessions => "🗄",
             AppState::Error => "✖",
         };
 
@@ -837,6 +965,7 @@ impl App {
             AppState::Approval => COLOR_ERROR,
             AppState::Agents => COLOR_BANNER,
             AppState::Config => COLOR_DIM,
+            AppState::Sessions => COLOR_BANNER,
             AppState::Error => COLOR_ERROR,
         };
 
@@ -905,10 +1034,19 @@ impl App {
             match msg.style {
                 ChatStyle::Welcome => {
                     for line in msg.content.lines() {
-                        lines.push(Line::from(Span::styled(
-                            format!("  {line}"),
-                            Style::default().fg(COLOR_BANNER),
-                        )));
+                        if line.contains(':') && !line.starts_with("──") {
+                            let parts: Vec<&str> = line.splitn(2, ':').collect();
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("  {:<10}", parts[0]), Style::default().fg(COLOR_DIM)),
+                                Span::styled(":", Style::default().fg(COLOR_BORDER)),
+                                Span::styled(format!(" {}", parts[1]), Style::default().fg(COLOR_BANNER).bold()),
+                            ]));
+                        } else {
+                            lines.push(Line::from(Span::styled(
+                                format!("  {line}"),
+                                Style::default().fg(COLOR_BANNER),
+                            )));
+                        }
                     }
                     lines.push(Line::from(""));
                 }
@@ -1094,6 +1232,7 @@ impl App {
             AppState::Approval | AppState::Error => COLOR_ERROR,
             AppState::Agents => COLOR_BANNER,
             AppState::Config => COLOR_BORDER,
+            AppState::Sessions => COLOR_BORDER,
         };
 
         let prompt = match self.input_mode {
@@ -1120,6 +1259,7 @@ impl App {
                 AppState::Approval | AppState::Error => Style::default().fg(COLOR_ERROR),
                 AppState::Agents => Style::default().fg(COLOR_DIM),
                 AppState::Config => Style::default().fg(COLOR_DIM),
+                AppState::Sessions => Style::default().fg(COLOR_DIM),
             };
             lines.push(Line::from(vec![
                 Span::styled(prefix, style),
@@ -1398,6 +1538,145 @@ impl App {
 
         let list = Paragraph::new(lines).style(Style::default().bg(COLOR_CODE_BG));
         frame.render_widget(list, inner);
+    }
+
+    fn render_sessions_overlay(&self, frame: &mut Frame, area: Rect) {
+        let (desired_width, desired_height) = (area.width.saturating_sub(10).clamp(60, 100), area.height.saturating_sub(10).clamp(20, 50));
+        let popup_area = Rect {
+            x: area.x + (area.width.saturating_sub(desired_width)) / 2,
+            y: area.y + (area.height.saturating_sub(desired_height)) / 2,
+            width: desired_width,
+            height: desired_height,
+        };
+
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_BORDER))
+            .title(Span::styled(" Sessions ", Style::default().fg(COLOR_BANNER).bold()));
+        
+        frame.render_widget(block, popup_area);
+        
+        let inner = Rect {
+            x: popup_area.x + 2,
+            y: popup_area.y + 1,
+            width: popup_area.width.saturating_sub(4),
+            height: popup_area.height.saturating_sub(2),
+        };
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Title "Sessions" and "esc"
+                Constraint::Length(2), // Search box
+                Constraint::Min(0),    // List
+                Constraint::Length(1), // Footer hints
+            ])
+            .split(inner);
+
+        // Header
+        let header = Line::from(vec![
+            Span::styled("Sessions", Style::default().fg(Color::White).bold()),
+            Span::raw(" ".repeat(chunks[0].width.saturating_sub(12) as usize)),
+            Span::styled("esc", Style::default().fg(COLOR_DIM)),
+        ]);
+        frame.render_widget(Paragraph::new(header), chunks[0]);
+
+        // Search Box
+        let search_line = Line::from(vec![
+            Span::styled("S", Style::default().fg(COLOR_ACCENT).bold()),
+            Span::styled(format!("earch: {}", self.sessions_ui_state.query), Style::default().fg(COLOR_DIM)),
+        ]);
+        frame.render_widget(Paragraph::new(search_line), chunks[1]);
+
+        // Filter and Group Sessions
+        let filtered: Vec<_> = self.sessions_ui_state.sessions.iter()
+            .filter(|s| {
+                let q = self.sessions_ui_state.query.to_lowercase();
+                s.title.as_ref().map(|t| t.to_lowercase().contains(&q)).unwrap_or(false) ||
+                s.id.to_lowercase().contains(&q) ||
+                s.model.to_lowercase().contains(&q)
+            })
+            .collect();
+
+        let mut items = Vec::new();
+        let now = Local::now();
+        let mut last_date = String::new();
+
+        for (i, meta) in filtered.iter().enumerate() {
+            let dt: DateTime<Local> = DateTime::from(std::time::UNIX_EPOCH + std::time::Duration::from_secs(meta.updated_at));
+            let date_str = if dt.date_naive() == now.date_naive() {
+                "Today".to_string()
+            } else if dt.date_naive() == now.date_naive().pred_opt().unwrap_or(dt.date_naive()) {
+                "Yesterday".to_string()
+            } else {
+                dt.format("%a %b %d %Y").to_string()
+            };
+
+            if date_str != last_date {
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw("\n"),
+                    Span::styled(date_str.clone(), Style::default().fg(COLOR_ACCENT).bold()),
+                ])));
+                last_date = date_str;
+            }
+
+            let is_selected = i == self.sessions_ui_state.selected_index;
+            let mut style = Style::default().fg(COLOR_CODE_FG);
+            if is_selected {
+                style = style.bg(COLOR_ACCENT).fg(Color::Black).bold();
+            }
+
+            let title = meta.title.as_deref().unwrap_or(&meta.id);
+            // Truncate title if too long
+            let max_title_len = chunks[2].width.saturating_sub(15) as usize;
+            let display_title = if title.len() > max_title_len {
+                format!("{}...", &title[..max_title_len.saturating_sub(3)])
+            } else {
+                title.to_string()
+            };
+
+            let time_str = dt.format("%I:%M %p").to_string();
+            
+            let row = Line::from(vec![
+                Span::styled(format!(" {:<width$} ", display_title, width = max_title_len), style),
+                Span::raw(" "),
+                Span::styled(time_str, Style::default().fg(COLOR_DIM)),
+            ]);
+            items.push(ListItem::new(row));
+        }
+
+        let list = List::new(items);
+        frame.render_widget(list, chunks[2]);
+
+        // Footer hints
+        let hints = Line::from(vec![
+            Span::styled("delete ", Style::default().fg(Color::White).bold()),
+            Span::styled("ctrl+d  ", Style::default().fg(COLOR_DIM)),
+            Span::styled("rename ", Style::default().fg(Color::White).bold()),
+            Span::styled("ctrl+r", Style::default().fg(COLOR_DIM)),
+        ]);
+        frame.render_widget(Paragraph::new(hints), chunks[3]);
+
+        // Rename dialog (conditional)
+        if self.sessions_ui_state.is_renaming {
+            let rename_area = centered_rect(40, 10, popup_area);
+            frame.render_widget(Clear, rename_area);
+            let rename_block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_ACCENT))
+                .title(" Rename Session ");
+            let rename_input = Paragraph::new(self.sessions_ui_state.rename_input.as_str())
+                .block(rename_block);
+            frame.render_widget(rename_input, rename_area);
+            
+            // Set cursor in the rename box
+            frame.set_cursor_position(Position::new(
+                rename_area.x + 1 + self.sessions_ui_state.rename_input.len() as u16,
+                rename_area.y + 2,
+            ));
+        }
     }
 
     fn render_approval_dialog(&self, frame: &mut Frame, area: Rect) {
@@ -1683,9 +1962,9 @@ impl App {
                         ));
                         let skip_to = i + 1 + end + 1;
                         while let Some(&(j, _)) = chars.peek() {
-                            if j >= skip_to { break; }
-                            chars.next();
-                        }
+                                if j >= skip_to { break; }
+                                chars.next();
+                            }
                         plain_start = skip_to;
                         continue;
                     }
@@ -1723,7 +2002,7 @@ mod tests {
 
     #[test]
     fn test_app_creation() {
-        let app = App::new("claude-sonnet-4-20250514", "anthropic", "default", 0);
+        let app = App::new("claude-sonnet-4-20250514", "anthropic", "default", 0, "test-session");
         assert_eq!(app.state, AppState::Idle);
         assert!(app.running);
         assert!(app.input.is_empty());
@@ -1732,7 +2011,7 @@ mod tests {
 
     #[test]
     fn test_input_editing() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.insert_char('h');
         app.insert_char('i');
         assert_eq!(app.input, "hi");
@@ -1744,7 +2023,7 @@ mod tests {
 
     #[test]
     fn test_submit_input() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.insert_char('h');
         app.insert_char('i');
         let text = app.submit_input();
@@ -1754,7 +2033,7 @@ mod tests {
 
     #[test]
     fn test_push_chat() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.push_chat("user", "Hello!", ChatStyle::User);
         assert_eq!(app.chat_lines.len(), 1);
         assert!(app.auto_scroll);
@@ -1762,7 +2041,7 @@ mod tests {
 
     #[test]
     fn test_auto_scroll_on_push() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.auto_scroll = false;
         app.push_chat("user", "Hello!", ChatStyle::User);
         assert!(app.auto_scroll);
@@ -1770,14 +2049,14 @@ mod tests {
 
     #[test]
     fn test_slash_help() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         assert!(app.handle_slash_command("/help"));
         assert_eq!(app.chat_lines.len(), 1);
     }
 
     #[test]
     fn test_slash_clear() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.push_chat("user", "test", ChatStyle::User);
         assert!(app.handle_slash_command("/clear"));
         assert_eq!(app.chat_lines.len(), 1);
@@ -1785,20 +2064,20 @@ mod tests {
 
     #[test]
     fn test_slash_unknown() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         assert!(app.handle_slash_command("/foo"));
         assert!(app.chat_lines[0].content.contains("Unknown"));
     }
 
     #[test]
     fn test_non_slash() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         assert!(!app.handle_slash_command("hello"));
     }
 
     #[test]
     fn test_multi_line() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.insert_char('a');
         app.insert_newline();
         app.insert_char('b');
@@ -1819,7 +2098,7 @@ mod tests {
 
     #[test]
     fn test_tokens() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.record_tokens(100, 50);
         assert_eq!(app.total_input_tokens, 100);
         app.record_tokens(200, 100);
@@ -1835,7 +2114,7 @@ mod tests {
 
     #[test]
     fn test_welcome_once() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.show_welcome();
         let n = app.chat_lines.len();
         app.show_welcome();
@@ -1851,7 +2130,7 @@ mod tests {
 
     #[test]
     fn test_slash_menu_active_and_filtered() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.input = "/m".to_string();
         app.cursor_pos = app.input.len();
         let items = app.filtered_slash_commands();
@@ -1862,10 +2141,12 @@ mod tests {
 
     #[test]
     fn test_slash_selection_wraps() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.input = "/".to_string();
         app.cursor_pos = 1;
         app.sync_slash_menu_selection();
+        
+        app.slash_menu_selected = 0;
         app.move_slash_selection_up();
         assert_eq!(
             app.slash_menu_selected,
@@ -1877,27 +2158,34 @@ mod tests {
 
     #[test]
     fn test_slash_agents_opens_dialog() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         assert!(app.handle_slash_command("/agents"));
         assert_eq!(app.state, AppState::Agents);
     }
 
     #[test]
+    fn test_slash_session_opens_overlay() {
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
+        assert!(app.handle_slash_command("/session"));
+        assert_eq!(app.state, AppState::Sessions);
+    }
+
+    #[test]
     fn test_slash_tree_is_reserved_for_runner_inspection() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         assert!(!app.handle_slash_command("/tree"));
     }
 
     #[test]
     fn test_slash_tools_is_reserved_for_runner_inspection() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         assert!(!app.handle_slash_command("/tools"));
         assert!(!app.handle_slash_command("/tool read"));
     }
 
     #[test]
     fn test_select_current_agent_updates_active_agent() {
-        let mut app = App::new("test", "test", "default", 0);
+        let mut app = App::new("test", "test", "default", 0, "test-session", None);
         app.state = AppState::Agents;
         app.agent_menu_selected = app
             .all_agents()
@@ -1916,4 +2204,25 @@ mod tests {
         assert_eq!(parsed.0, "review");
         assert_eq!(parsed.1, "inspect this diff");
     }
+}
+
+/// helper function to create a centered rect using up certain percentage of the available rect `r`
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

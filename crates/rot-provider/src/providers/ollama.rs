@@ -8,13 +8,8 @@ const OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
 /// Create a new Ollama provider.
 ///
 /// Uses the OpenAI-compatible endpoint exposed by Ollama.
-pub fn new_ollama_provider(api_key: String) -> OpenAiCompatProvider {
-    let config = OpenAiCompatConfig {
-        base_url: std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| OLLAMA_BASE_URL.to_string()),
-        api_key,
-        provider_name: "ollama".to_string(),
-        default_model: "llama3.1".to_string(),
-        models: vec![
+pub fn new_ollama_provider(api_key: String, custom_models: Vec<ModelInfo>) -> OpenAiCompatProvider {
+    let mut models = vec![
             ModelInfo {
                 id: "llama3.1".to_string(),
                 name: "Llama 3.1".to_string(),
@@ -39,7 +34,16 @@ pub fn new_ollama_provider(api_key: String) -> OpenAiCompatProvider {
                 supports_thinking: true, // Native deepseek internal thinking
                 supports_tools: false,
             },
-        ],
+        ];
+    
+    models.extend(custom_models);
+
+    let config = OpenAiCompatConfig {
+        base_url: std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| OLLAMA_BASE_URL.to_string()),
+        api_key,
+        provider_name: "ollama".to_string(),
+        default_model: "llama3.1".to_string(),
+        models,
     };
 
     OpenAiCompatProvider::new(config)
@@ -52,19 +56,19 @@ mod tests {
 
     #[test]
     fn test_ollama_provider_name() {
-        let p = new_ollama_provider(String::new());
+        let p = new_ollama_provider(String::new(), vec![]);
         assert_eq!(p.name(), "ollama");
     }
 
     #[test]
     fn test_ollama_default_model() {
-        let p = new_ollama_provider(String::new());
+        let p = new_ollama_provider(String::new(), vec![]);
         assert_eq!(p.current_model(), "llama3.1");
     }
 
     #[test]
     fn test_ollama_set_model() {
-        let mut p = new_ollama_provider(String::new());
+        let mut p = new_ollama_provider(String::new(), vec![]);
         assert!(p.set_model("qwen2.5-coder").is_ok());
         assert_eq!(p.current_model(), "qwen2.5-coder");
     }

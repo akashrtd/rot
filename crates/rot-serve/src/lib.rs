@@ -223,16 +223,16 @@ async fn load_tool_registry(
 
 fn create_provider(provider_name: &str, model: Option<&str>) -> anyhow::Result<Box<dyn Provider>> {
     let mut provider: Box<dyn Provider> = match provider_name {
-        "anthropic" => Box::new(AnthropicProvider::new(required_env("ANTHROPIC_API_KEY")?)),
-        "zai" => Box::new(new_zai_provider(required_env("ZAI_API_KEY")?)),
-        "openai" => Box::new(new_openai_provider(required_env("OPENAI_API_KEY")?)),
-        "ollama" => Box::new(new_ollama_provider(String::new())),
-        "openrouter" => Box::new(new_openrouter_provider(required_env("OPENROUTER_API_KEY")?)),
+        "anthropic" => Box::new(AnthropicProvider::new(required_env("ANTHROPIC_API_KEY")?, vec![])),
+        "zai" => Box::new(new_zai_provider(required_env("ZAI_API_KEY")?, vec![])),
+        "openai" => Box::new(new_openai_provider(required_env("OPENAI_API_KEY")?, vec![])),
+        "ollama" => Box::new(new_ollama_provider(String::new(), vec![])),
+        "openrouter" => Box::new(new_openrouter_provider(required_env("OPENROUTER_API_KEY")?, vec![])),
         "google" => {
             let key = std::env::var("GOOGLE_API_KEY")
                 .or_else(|_| std::env::var("GEMINI_API_KEY"))
                 .map_err(|_| anyhow::anyhow!("GOOGLE_API_KEY or GEMINI_API_KEY not set"))?;
-            Box::new(new_google_provider(key))
+            Box::new(new_google_provider(key, vec![]))
         }
         other => {
             return Err(anyhow::anyhow!(

@@ -6,13 +6,8 @@ use crate::types::ModelInfo;
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 
 /// Create a new OpenRouter provider.
-pub fn new_openrouter_provider(api_key: String) -> OpenAiCompatProvider {
-    let config = OpenAiCompatConfig {
-        base_url: OPENROUTER_BASE_URL.to_string(),
-        api_key,
-        provider_name: "openrouter".to_string(),
-        default_model: "openai/gpt-4o-mini".to_string(),
-        models: vec![
+pub fn new_openrouter_provider(api_key: String, custom_models: Vec<ModelInfo>) -> OpenAiCompatProvider {
+    let mut models = vec![
             ModelInfo {
                 id: "openai/gpt-4o-mini".to_string(),
                 name: "OpenAI GPT-4o mini (via OpenRouter)".to_string(),
@@ -69,7 +64,16 @@ pub fn new_openrouter_provider(api_key: String) -> OpenAiCompatProvider {
                 supports_thinking: true,
                 supports_tools: true,
             },
-        ],
+        ];
+    
+    models.extend(custom_models);
+
+    let config = OpenAiCompatConfig {
+        base_url: OPENROUTER_BASE_URL.to_string(),
+        api_key,
+        provider_name: "openrouter".to_string(),
+        default_model: "openai/gpt-4o-mini".to_string(),
+        models,
     };
 
     OpenAiCompatProvider::new(config)
@@ -82,19 +86,19 @@ mod tests {
 
     #[test]
     fn test_openrouter_provider_name() {
-        let p = new_openrouter_provider("test-key".to_string());
+        let p = new_openrouter_provider("test-key".to_string(), vec![]);
         assert_eq!(p.name(), "openrouter");
     }
 
     #[test]
     fn test_openrouter_default_model() {
-        let p = new_openrouter_provider("test-key".to_string());
+        let p = new_openrouter_provider("test-key".to_string(), vec![]);
         assert_eq!(p.current_model(), "openai/gpt-4o-mini");
     }
 
     #[test]
     fn test_openrouter_set_model() {
-        let mut p = new_openrouter_provider("test-key".to_string());
+        let mut p = new_openrouter_provider("test-key".to_string(), vec![]);
         assert!(p.set_model("anthropic/claude-3.5-sonnet").is_ok());
         assert_eq!(p.current_model(), "anthropic/claude-3.5-sonnet");
     }

@@ -25,16 +25,18 @@ pub struct AnthropicProvider {
     api_key: String,
     model: String,
     base_url: String,
+    custom_models: Vec<ModelInfo>,
 }
 
 impl AnthropicProvider {
     /// Create a new Anthropic provider with the given API key.
-    pub fn new(api_key: impl Into<String>) -> Self {
+    pub fn new(api_key: impl Into<String>, custom_models: Vec<ModelInfo>) -> Self {
         Self {
             client: Client::new(),
             api_key: api_key.into(),
             model: DEFAULT_MODEL.to_string(),
             base_url: API_BASE.to_string(),
+            custom_models,
         }
     }
 
@@ -250,7 +252,7 @@ impl Provider for AnthropicProvider {
     }
 
     fn models(&self) -> Vec<ModelInfo> {
-        vec![
+        let mut m = vec![
             ModelInfo {
                 id: "claude-sonnet-4-20250514".to_string(),
                 name: "Claude Sonnet 4".to_string(),
@@ -283,7 +285,9 @@ impl Provider for AnthropicProvider {
                 supports_thinking: false,
                 supports_tools: true,
             },
-        ]
+        ];
+        m.extend(self.custom_models.clone());
+        m
     }
 
     fn current_model(&self) -> &str {
@@ -512,19 +516,19 @@ mod tests {
 
     #[test]
     fn test_provider_name() {
-        let provider = AnthropicProvider::new("test-key");
+        let provider = AnthropicProvider::new("test-key", vec![]);
         assert_eq!(provider.name(), "anthropic");
     }
 
     #[test]
     fn test_default_model() {
-        let provider = AnthropicProvider::new("test-key");
+        let provider = AnthropicProvider::new("test-key", vec![]);
         assert_eq!(provider.current_model(), DEFAULT_MODEL);
     }
 
     #[test]
     fn test_set_valid_model() {
-        let mut provider = AnthropicProvider::new("test-key");
+        let mut provider = AnthropicProvider::new("test-key", vec![]);
         assert!(provider
             .set_model("claude-3-5-sonnet-20241022")
             .is_ok());
@@ -533,13 +537,13 @@ mod tests {
 
     #[test]
     fn test_set_invalid_model() {
-        let mut provider = AnthropicProvider::new("test-key");
+        let mut provider = AnthropicProvider::new("test-key", vec![]);
         assert!(provider.set_model("nonexistent-model").is_err());
     }
 
     #[test]
     fn test_anthropic_models() {
-        let p = AnthropicProvider::new("test-key");
+        let p = AnthropicProvider::new("test-key", vec![]);
         let models = p.models();
         assert!(models.len() >= 2);
         assert!(models.iter().any(|m| m.id == "claude-sonnet-4-20250514"));
@@ -550,7 +554,7 @@ mod tests {
 
     #[test]
     fn test_build_request_body() {
-        let provider = AnthropicProvider::new("test-key");
+        let provider = AnthropicProvider::new("test-key", vec![]);
         let request = Request {
             messages: vec![ProviderMessage {
                 role: "user".to_string(),
@@ -573,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_build_request_with_tools() {
-        let provider = AnthropicProvider::new("test-key");
+        let provider = AnthropicProvider::new("test-key", vec![]);
         let request = Request {
             messages: vec![],
             tools: vec![ToolDefinition {
@@ -593,7 +597,7 @@ mod tests {
 
     #[test]
     fn test_parse_text_delta() {
-        let provider = AnthropicProvider::new("test-key");
+        let provider = AnthropicProvider::new("test-key", vec![]);
         let event = AnthropicEvent::ContentBlockDelta {
             delta: Delta::Text {
                 text: "Hello".to_string(),
@@ -610,7 +614,7 @@ mod tests {
 
     #[test]
     fn test_parse_tool_call_start() {
-        let provider = AnthropicProvider::new("test-key");
+        let provider = AnthropicProvider::new("test-key", vec![]);
         let event = AnthropicEvent::ContentBlockStart {
             content_block: ContentBlockInfo::ToolUse {
                 id: "tc_1".to_string(),
@@ -631,7 +635,7 @@ mod tests {
 
     #[test]
     fn test_parse_message_delta_stop() {
-        let provider = AnthropicProvider::new("test-key");
+        let provider = AnthropicProvider::new("test-key", vec![]);
         let event = AnthropicEvent::MessageDelta {
             delta: MessageDeltaData {
                 stop_reason: Some("end_turn".to_string()),
@@ -648,7 +652,7 @@ mod tests {
 
     #[test]
     fn test_parse_error_event() {
-        let provider = AnthropicProvider::new("test-key");
+        let provider = AnthropicProvider::new("test-key", vec![]);
         let event = AnthropicEvent::Error {
             error: ErrorData {
                 error_type: "rate_limit".to_string(),

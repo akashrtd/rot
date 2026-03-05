@@ -89,7 +89,7 @@ async fn test_stream_with_wiremock_sse() {
     mount_openai_stream_mock(&server).await;
 
     // We instantiate generic openai_compat but with openai's default
-    let provider = new_openai_provider("test-key".to_string()).with_base_url(&format!("{}/v1", server.uri()));
+    let provider = new_openai_provider("test-key".to_string(), vec![]).with_base_url(&format!("{}/v1", server.uri()));
     let mut stream = provider
         .stream(sample_request())
         .await
@@ -125,7 +125,7 @@ async fn test_complete_with_wiremock_sse() {
     let server = MockServer::start().await;
     mount_openai_stream_mock(&server).await;
 
-    let provider = new_openai_provider("test-key".to_string()).with_base_url(&format!("{}/v1", server.uri()));
+    let provider = new_openai_provider("test-key".to_string(), vec![]).with_base_url(&format!("{}/v1", server.uri()));
     let response = provider
         .complete(sample_request())
         .await

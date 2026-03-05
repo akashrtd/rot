@@ -191,35 +191,35 @@ async fn test_rlm_context_manager() {
 
 #[test]
 fn test_provider_anthropic_creation() {
-    let provider = AnthropicProvider::new("test-key".to_string());
+    let provider = AnthropicProvider::new("test-key".to_string(), vec![]);
     assert_eq!(provider.name(), "anthropic");
     assert_eq!(provider.current_model(), "claude-sonnet-4-20250514");
 }
 
 #[test]
 fn test_provider_zai_creation() {
-    let provider = new_zai_provider("test-key".to_string());
+    let provider = new_zai_provider("test-key".to_string(), vec![]);
     assert_eq!(provider.name(), "zai");
     assert_eq!(provider.current_model(), "glm-5");
 }
 
 #[test]
 fn test_all_providers_have_models() {
-    let anthropic = AnthropicProvider::new("key".to_string());
+    let anthropic = AnthropicProvider::new("key".to_string(), vec![]);
     assert!(!anthropic.models().is_empty());
 
-    let zai = new_zai_provider("key".to_string());
+    let zai = new_zai_provider("key".to_string(), vec![]);
     assert!(!zai.models().is_empty());
 
-    let openai = new_openai_provider("key".to_string());
+    let openai = new_openai_provider("key".to_string(), vec![]);
     assert!(!openai.models().is_empty());
 
-    let ollama = new_ollama_provider(String::new());
+    let ollama = new_ollama_provider(String::new(), vec![]);
     assert!(!ollama.models().is_empty());
 
-    let openrouter = new_openrouter_provider("key".to_string());
+    let openrouter = new_openrouter_provider("key".to_string(), vec![]);
     assert!(!openrouter.models().is_empty());
 
-    let google = new_google_provider("key".to_string());
+    let google = new_google_provider("key".to_string(), vec![]);
     assert!(!google.models().is_empty());
 }

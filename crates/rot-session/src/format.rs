@@ -23,6 +23,8 @@ pub enum SessionEntry {
         parent_tool_call_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     },
 
     /// A chat message (user, assistant, or system).
@@ -99,7 +101,7 @@ pub enum SessionEntry {
 }
 
 /// Metadata about a session (read from first line + computed stats).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionMeta {
     /// Session identifier.
     pub id: String,
@@ -187,6 +189,7 @@ mod tests {
             parent_session_id: None,
             parent_tool_call_id: None,
             agent: None,
+            title: None,
         };
 
         let json = serde_json::to_string(&entry).unwrap();
@@ -305,6 +308,7 @@ mod tests {
             parent_session_id: None,
             parent_tool_call_id: None,
             agent: None,
+            title: None,
         };
         assert_eq!(entry_timestamp(&entry), 999);
     }
@@ -337,6 +341,7 @@ mod tests {
                 parent_session_id: None,
                 parent_tool_call_id: None,
                 agent: None,
+                title: None,
             },
             SessionEntry::Message {
                 id: "m1".to_string(),

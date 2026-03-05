@@ -1,9 +1,12 @@
 //! Shared provider registry and factory helpers for CLI commands.
 
 use rot_provider::{
-    AnthropicProvider, Provider, new_google_provider, new_ollama_provider, new_openai_provider,
-    new_openrouter_provider, new_zai_provider, new_mock_provider,
+    AnthropicProvider, Provider, new_google_provider, new_mock_provider, new_ollama_provider,
+    new_openai_provider, new_openrouter_provider, new_zai_provider,
 };
+use rot_provider::types::ModelInfo;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Built-in provider metadata.
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +67,22 @@ pub fn descriptor_for(name: &str) -> Option<&'static ProviderDescriptor> {
     BUILTIN_PROVIDERS.iter().find(|p| p.name == name)
 }
 
+/// Resolve custom models injected via ~/.rot/models.json
+fn resolve_custom_models(provider_name: &str) -> Vec<ModelInfo> {
+    let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push(".rot");
+    path.push("models.json");
+
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Ok(custom_config) = serde_json::from_str::<HashMap<String, Vec<ModelInfo>>>(&content) {
+            if let Some(models) = custom_config.get(provider_name) {
+                return models.clone();
+            }
+        }
+    }
+    Vec::new()
+}
+
 /// Create a provider by name.
 ///
 /// If `require_credentials` is true, missing API keys become a hard error for providers
@@ -73,31 +92,33 @@ pub fn create_provider(
     model: Option<&str>,
     require_credentials: bool,
 ) -> anyhow::Result<Box<dyn Provider>> {
+    let custom_models = resolve_custom_models(provider_name);
+
     let mut provider: Box<dyn Provider> = match provider_name {
-        "anthropic" => Box::new(AnthropicProvider::new(resolve_api_key(
-            descriptor_for("anthropic").unwrap(),
-            require_credentials,
-        )?)),
-        "zai" => Box::new(new_zai_provider(resolve_api_key(
-            descriptor_for("zai").unwrap(),
-            require_credentials,
-        )?)),
-        "openai" => Box::new(new_openai_provider(resolve_api_key(
-            descriptor_for("openai").unwrap(),
-            require_credentials,
-        )?)),
-        "ollama" => Box::new(new_ollama_provider(resolve_api_key(
-            descriptor_for("ollama").unwrap(),
-            require_credentials,
-        )?)),
-        "openrouter" => Box::new(new_openrouter_provider(resolve_api_key(
-            descriptor_for("openrouter").unwrap(),
-            require_credentials,
-        )?)),
-        "google" => Box::new(new_google_provider(resolve_api_key(
-            descriptor_for("google").unwrap(),
-            require_credentials,
-        )?)),
+        "anthropic" => Box::new(AnthropicProvider::new(
+            resolve_api_key(descriptor_for("anthropic").unwrap(), require_credentials)?,
+            custom_models,
+        )),
+        "zai" => Box::new(new_zai_provider(
+            resolve_api_key(descriptor_for("zai").unwrap(), require_credentials)?,
+            custom_models,
+        )),
+        "openai" => Box::new(new_openai_provider(
+            resolve_api_key(descriptor_for("openai").unwrap(), require_credentials)?,
+            custom_models,
+        )),
+        "ollama" => Box::new(new_ollama_provider(
+            resolve_api_key(descriptor_for("ollama").unwrap(), require_credentials)?,
+            custom_models,
+        )),
+        "openrouter" => Box::new(new_openrouter_provider(
+            resolve_api_key(descriptor_for("openrouter").unwrap(), require_credentials)?,
+            custom_models,
+        )),
+        "google" => Box::new(new_google_provider(
+            resolve_api_key(descriptor_for("google").unwrap(), require_credentials)?,
+            custom_models,
+        )),
         "mock" => Box::new(new_mock_provider(resolve_mock_responses()?)),
         other => {
             return Err(anyhow::anyhow!(

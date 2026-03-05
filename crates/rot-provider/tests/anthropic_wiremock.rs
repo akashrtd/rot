@@ -61,7 +61,7 @@ async fn test_stream_with_wiremock_sse() {
     let server = MockServer::start().await;
     mount_anthropic_stream_mock(&server).await;
 
-    let provider = AnthropicProvider::new("test-key").with_base_url(server.uri());
+    let provider = AnthropicProvider::new("test-key", vec![]).with_base_url(server.uri());
     let mut stream = provider
         .stream(sample_request())
         .await
@@ -97,7 +97,7 @@ async fn test_complete_with_wiremock_sse() {
     let server = MockServer::start().await;
     mount_anthropic_stream_mock(&server).await;
 
-    let provider = AnthropicProvider::new("test-key").with_base_url(server.uri());
+    let provider = AnthropicProvider::new("test-key", vec![]).with_base_url(server.uri());
     let response = provider
         .complete(sample_request())
         .await

@@ -6,13 +6,8 @@ use crate::types::ModelInfo;
 const GOOGLE_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 /// Create a new Google provider.
-pub fn new_google_provider(api_key: String) -> OpenAiCompatProvider {
-    let config = OpenAiCompatConfig {
-        base_url: GOOGLE_BASE_URL.to_string(),
-        api_key,
-        provider_name: "google".to_string(),
-        default_model: "gemini-2.5-flash".to_string(),
-        models: vec![
+pub fn new_google_provider(api_key: String, custom_models: Vec<ModelInfo>) -> OpenAiCompatProvider {
+    let mut models = vec![
             ModelInfo {
                 id: "gemini-2.5-flash".to_string(),
                 name: "Gemini 2.5 Flash".to_string(),
@@ -29,7 +24,16 @@ pub fn new_google_provider(api_key: String) -> OpenAiCompatProvider {
                 supports_thinking: false,
                 supports_tools: true,
             },
-        ],
+        ];
+    
+    models.extend(custom_models);
+
+    let config = OpenAiCompatConfig {
+        base_url: GOOGLE_BASE_URL.to_string(),
+        api_key,
+        provider_name: "google".to_string(),
+        default_model: "gemini-2.5-flash".to_string(),
+        models,
     };
 
     OpenAiCompatProvider::new(config)
@@ -42,19 +46,19 @@ mod tests {
 
     #[test]
     fn test_google_provider_name() {
-        let p = new_google_provider("test-key".to_string());
+        let p = new_google_provider("test-key".to_string(), vec![]);
         assert_eq!(p.name(), "google");
     }
 
     #[test]
     fn test_google_default_model() {
-        let p = new_google_provider("test-key".to_string());
+        let p = new_google_provider("test-key".to_string(), vec![]);
         assert_eq!(p.current_model(), "gemini-2.5-flash");
     }
 
     #[test]
     fn test_google_set_model() {
-        let mut p = new_google_provider("test-key".to_string());
+        let mut p = new_google_provider("test-key".to_string(), vec![]);
         assert!(p.set_model("gemini-2.5-pro").is_ok());
         assert_eq!(p.current_model(), "gemini-2.5-pro");
     }

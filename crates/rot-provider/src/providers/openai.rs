@@ -31,6 +31,30 @@ pub fn new_openai_provider(api_key: String) -> OpenAiCompatProvider {
                 supports_thinking: false,
                 supports_tools: true,
             },
+            ModelInfo {
+                id: "o1".to_string(),
+                name: "o1".to_string(),
+                context_window: 200_000,
+                max_output_tokens: 32_768,
+                supports_thinking: true, // Internal thinking handled by API
+                supports_tools: true, // Only recently supported via function calling
+            },
+            ModelInfo {
+                id: "o1-mini".to_string(),
+                name: "o1-mini".to_string(),
+                context_window: 128_000,
+                max_output_tokens: 65_536,
+                supports_thinking: true, // Internal thinking
+                supports_tools: false,
+            },
+            ModelInfo {
+                id: "o3-mini".to_string(),
+                name: "o3-mini".to_string(),
+                context_window: 200_000,
+                max_output_tokens: 100_000,
+                supports_thinking: true, // Internal thinking
+                supports_tools: true,
+            },
         ],
     };
 
@@ -58,9 +82,10 @@ mod tests {
     fn test_openai_models() {
         let p = new_openai_provider("test-key".to_string());
         let models = p.models();
-        assert_eq!(models.len(), 2);
+        assert!(models.len() >= 2);
         assert!(models.iter().any(|m| m.id == "gpt-4o"));
         assert!(models.iter().any(|m| m.id == "gpt-4o-mini"));
+        assert!(models.iter().any(|m| m.id == "o3-mini"));
     }
 
     #[test]

@@ -31,6 +31,14 @@ pub fn new_ollama_provider(api_key: String) -> OpenAiCompatProvider {
                 supports_thinking: false,
                 supports_tools: true,
             },
+            ModelInfo {
+                id: "deepseek-r1".to_string(),
+                name: "DeepSeek R1 (Local Reasoning)".to_string(),
+                context_window: 128_000, // Depends on quantization, assuming large
+                max_output_tokens: 8_192,
+                supports_thinking: true, // Native deepseek internal thinking
+                supports_tools: false,
+            },
         ],
     };
 

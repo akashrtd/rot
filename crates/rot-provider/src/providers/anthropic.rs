@@ -267,6 +267,22 @@ impl Provider for AnthropicProvider {
                 supports_thinking: false,
                 supports_tools: true,
             },
+            ModelInfo {
+                id: "claude-3-5-haiku-20241022".to_string(),
+                name: "Claude 3.5 Haiku".to_string(),
+                context_window: 200_000,
+                max_output_tokens: 8_192,
+                supports_thinking: false,
+                supports_tools: true,
+            },
+            ModelInfo {
+                id: "claude-3-opus-20240229".to_string(),
+                name: "Claude 3 Opus".to_string(),
+                context_window: 200_000,
+                max_output_tokens: 4_096,
+                supports_thinking: false,
+                supports_tools: true,
+            },
         ]
     }
 
@@ -522,11 +538,14 @@ mod tests {
     }
 
     #[test]
-    fn test_models_list() {
-        let provider = AnthropicProvider::new("test-key");
-        let models = provider.models();
-        assert_eq!(models.len(), 2);
+    fn test_anthropic_models() {
+        let p = AnthropicProvider::new("test-key");
+        let models = p.models();
+        assert!(models.len() >= 2);
         assert!(models.iter().any(|m| m.id == "claude-sonnet-4-20250514"));
+        assert!(models.iter().any(|m| m.id == "claude-3-5-sonnet-20241022"));
+        assert!(models.iter().any(|m| m.id == "claude-3-5-haiku-20241022"));
+        assert!(models.iter().any(|m| m.id == "claude-3-opus-20240229"));
     }
 
     #[test]
